@@ -34,7 +34,7 @@ fn spawn_map_mesh(
     // Load the real Twisted Treeline 3D map (converted from NVR)
     commands.spawn((
         SceneRoot(asset_server.load(
-            GltfAssetLabel::Scene(0).from_asset("maps/tt_blender.glb")
+            GltfAssetLabel::Scene(0).from_asset("maps/twisted_treeline_patched.glb")
         )),
         Transform::default(),
     ));
@@ -324,10 +324,19 @@ fn spawn_props(mut commands: Commands, asset_server: Res<AssetServer>) {
 }
 
 fn spawn_lighting(mut commands: Commands) {
-    // Strong directional light — LoL textures are pre-baked dark, need bright light
+    // Atmospheric fog for Shadow Isles depth
+    commands.spawn((
+        DistanceFog {
+            color: Color::srgb(0.03, 0.04, 0.08),
+            falloff: FogFalloff::Linear { start: 4000.0, end: 15000.0 },
+            ..default()
+        },
+    ));
+
+    // Main directional light
     commands.spawn((
         DirectionalLight {
-            illuminance: 8000.0,
+            illuminance: 10000.0,
             shadows_enabled: true,
             ..default()
         },
@@ -342,7 +351,7 @@ fn spawn_lighting(mut commands: Commands) {
     // Secondary fill light from opposite direction
     commands.spawn((
         DirectionalLight {
-            illuminance: 2500.0,
+            illuminance: 1000.0,
             shadows_enabled: false,
             ..default()
         },
@@ -369,7 +378,7 @@ fn spawn_lighting(mut commands: Commands) {
         commands.spawn((
             PointLight {
                 color: Color::srgb(1.0, 0.6, 0.2),
-                intensity: 800000.0,
+                intensity: 1500000.0,
                 range: 1500.0,
                 shadows_enabled: false,
                 ..default()
@@ -383,7 +392,7 @@ fn spawn_lighting(mut commands: Commands) {
         commands.spawn((
             PointLight {
                 color: Color::srgb(0.3, 0.4, 1.0),
-                intensity: 500000.0,
+                intensity: 800000.0,
                 range: 800.0,
                 shadows_enabled: false,
                 ..default()
@@ -409,7 +418,7 @@ fn spawn_lighting(mut commands: Commands) {
     commands.spawn((
         PointLight {
             color: Color::srgb(0.2, 0.5, 1.0),
-            intensity: 1000000.0,
+            intensity: 2000000.0,
             range: 1200.0,
             shadows_enabled: false,
             ..default()
@@ -420,7 +429,7 @@ fn spawn_lighting(mut commands: Commands) {
     commands.spawn((
         PointLight {
             color: Color::srgb(0.8, 0.2, 0.4),
-            intensity: 1000000.0,
+            intensity: 2000000.0,
             range: 1200.0,
             shadows_enabled: false,
             ..default()
