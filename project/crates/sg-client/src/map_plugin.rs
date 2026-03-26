@@ -34,20 +34,20 @@ fn spawn_map_mesh(
     // Load the real Twisted Treeline 3D map (converted from NVR)
     commands.spawn((
         SceneRoot(asset_server.load(
-            GltfAssetLabel::Scene(0).from_asset("maps/twisted_treeline_patched.glb")
+            GltfAssetLabel::Scene(0).from_asset("maps/tt_blender.glb")
         )),
         Transform::default(),
     ));
 
-    // Dark ground plane to fill black gaps (same tone as map floor)
+    // Dark ground plane below map
     commands.spawn((
         Mesh3d(meshes.add(Plane3d::new(Vec3::Y, Vec2::splat(50000.0)))),
         MeshMaterial3d(materials.add(StandardMaterial {
-            base_color: Color::srgb(0.08, 0.08, 0.10),
+            base_color: Color::srgb(0.02, 0.02, 0.03),
             unlit: true,
             ..default()
         })),
-        Transform::from_xyz(7700.0, -2100.0, 7000.0),
+        Transform::from_xyz(7700.0, -500.0, 7000.0),
     ));
 
     // Dark walls around the map edges (pseudo-skybox)
@@ -327,7 +327,7 @@ fn spawn_lighting(mut commands: Commands) {
     // Strong directional light — LoL textures are pre-baked dark, need bright light
     commands.spawn((
         DirectionalLight {
-            illuminance: 15000.0,
+            illuminance: 8000.0,
             shadows_enabled: true,
             ..default()
         },
@@ -342,7 +342,7 @@ fn spawn_lighting(mut commands: Commands) {
     // Secondary fill light from opposite direction
     commands.spawn((
         DirectionalLight {
-            illuminance: 5000.0,
+            illuminance: 2500.0,
             shadows_enabled: false,
             ..default()
         },
@@ -352,6 +352,80 @@ fn spawn_lighting(mut commands: Commands) {
             2.5,
             0.0,
         )),
+    ));
+
+    // === Brazier fire point lights (warm orange glow) ===
+    let brazier_positions: &[[f32; 3]] = &[
+        [1372.0, 630.0, 5049.9],
+        [390.2, 710.0, 6517.9],
+        [399.4, 740.0, 8021.1],
+        [1314.3, 630.0, 9495.6],
+        [14091.1, 630.0, 9530.3],
+        [14990.5, 720.0, 8053.9],
+        [15016.4, 710.0, 6532.8],
+        [14103.0, 630.0, 5098.4],
+    ];
+    for pos in brazier_positions {
+        commands.spawn((
+            PointLight {
+                color: Color::srgb(1.0, 0.6, 0.2),
+                intensity: 800000.0,
+                range: 1500.0,
+                shadows_enabled: false,
+                ..default()
+            },
+            Transform::from_xyz(pos[0], pos[1], pos[2]),
+        ));
+    }
+
+    // === Altar glow lights (blue-purple) ===
+    for pos in [[5400.0, 50.0, 6400.0], [9900.0, 50.0, 6400.0]] {
+        commands.spawn((
+            PointLight {
+                color: Color::srgb(0.3, 0.4, 1.0),
+                intensity: 500000.0,
+                range: 800.0,
+                shadows_enabled: false,
+                ..default()
+            },
+            Transform::from_xyz(pos[0], pos[1], pos[2]),
+        ));
+    }
+
+    // === Speed shrine glow (green-cyan) ===
+    commands.spawn((
+        PointLight {
+            color: Color::srgb(0.2, 0.9, 0.6),
+            intensity: 300000.0,
+            range: 600.0,
+            shadows_enabled: false,
+            ..default()
+        },
+        Transform::from_xyz(7706.3, 30.0, 6720.4),
+    ));
+
+    // === Nexus glow lights ===
+    // Blue nexus
+    commands.spawn((
+        PointLight {
+            color: Color::srgb(0.2, 0.5, 1.0),
+            intensity: 1000000.0,
+            range: 1200.0,
+            shadows_enabled: false,
+            ..default()
+        },
+        Transform::from_xyz(2981.0, 50.0, 7283.0),
+    ));
+    // Red nexus
+    commands.spawn((
+        PointLight {
+            color: Color::srgb(0.8, 0.2, 0.4),
+            intensity: 1000000.0,
+            range: 1200.0,
+            shadows_enabled: false,
+            ..default()
+        },
+        Transform::from_xyz(12379.5, 50.0, 7289.9),
     ));
 }
 

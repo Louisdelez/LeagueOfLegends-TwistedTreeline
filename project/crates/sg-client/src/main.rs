@@ -20,7 +20,7 @@ use menu::AppState;
 
 fn main() {
     App::new()
-        .insert_resource(ClearColor(Color::BLACK))
+        .insert_resource(ClearColor(Color::srgb(0.01, 0.01, 0.02)))
         .add_plugins(DefaultPlugins.set(WindowPlugin {
             primary_window: Some(Window {
                 title: "League of Legends — Twisted Treeline".into(),

@@ -36,3 +36,23 @@ project/gen_terrain.py
 # Sources and tools (cloned repos, not our code)
 sources/
 tools/
+
+# Extracted game data (too large, downloaded at build time)
+assets/extracted/
+assets/map10_922/
+assets/tt-video-ref/
+assets/cdtb_storage/
+
+# WAD/bundle files
+*.wad.client
+*.bundle
+*.manifest
+*.bnk
+*.wpk
+
+# DDS textures (converted to PNG)
+*.dds
+
+# Temp files
+/tmp/
+*.npy
