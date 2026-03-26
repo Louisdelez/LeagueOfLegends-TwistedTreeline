@@ -1,0 +1,466 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Twisted Treeline — 3v3 Arena</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700;900&display=swap');
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        :root {
+            --gold: #C89B3C;
+            --gold-light: #F0E6D2;
+            --gold-bright: #C8AA6E;
+            --dark-bg: #010A13;
+            --dark-navy: #0A1428;
+            --panel: #1E2328;
+            --text: #A09B8C;
+            --text-bright: #F0E6D2;
+            --blue: #0397AB;
+            --red: #E84057;
+        }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background: var(--dark-bg);
+            color: var(--text-bright);
+            overflow-x: hidden;
+        }
+
+        /* Hero */
+        .hero {
+            position: relative;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            text-align: center;
+            background: linear-gradient(180deg, rgba(1,10,19,0) 0%, rgba(1,10,19,0.9) 100%),
+                        linear-gradient(135deg, #0A1428 0%, #091520 50%, #0d1a2d 100%);
+            overflow: hidden;
+        }
+
+        .hero::before {
+            content: '';
+            position: absolute;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: radial-gradient(ellipse at 50% 40%, rgba(200,155,60,0.08) 0%, transparent 60%);
+        }
+
+        .hero-content { position: relative; z-index: 1; }
+
+        .hero h1 {
+            font-size: 4.5rem;
+            font-weight: 900;
+            letter-spacing: 0.15em;
+            color: var(--gold);
+            text-shadow: 0 0 40px rgba(200,155,60,0.3);
+            margin-bottom: 0.5rem;
+        }
+
+        .hero h2 {
+            font-size: 1.5rem;
+            font-weight: 300;
+            color: var(--gold-light);
+            letter-spacing: 0.3em;
+            margin-bottom: 2rem;
+        }
+
+        .hero p {
+            font-size: 1.1rem;
+            color: var(--text);
+            max-width: 600px;
+            line-height: 1.7;
+            margin-bottom: 3rem;
+        }
+
+        .btn-group { display: flex; gap: 1rem; justify-content: center; flex-wrap: wrap; }
+
+        .btn {
+            display: inline-block;
+            padding: 14px 40px;
+            font-size: 0.95rem;
+            font-weight: 600;
+            letter-spacing: 0.1em;
+            text-decoration: none;
+            text-transform: uppercase;
+            transition: all 0.3s;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, var(--gold) 0%, #A67C2E 100%);
+            color: var(--dark-bg);
+            border: 2px solid var(--gold);
+        }
+
+        .btn-primary:hover {
+            background: var(--gold-light);
+            box-shadow: 0 0 30px rgba(200,155,60,0.4);
+        }
+
+        .btn-secondary {
+            background: transparent;
+            color: var(--gold-light);
+            border: 2px solid var(--gold-bright);
+        }
+
+        .btn-secondary:hover {
+            background: rgba(200,170,110,0.1);
+            border-color: var(--gold-light);
+        }
+
+        .scroll-hint {
+            position: absolute;
+            bottom: 2rem;
+            left: 50%;
+            transform: translateX(-50%);
+            color: var(--text);
+            font-size: 0.8rem;
+            letter-spacing: 0.2em;
+            animation: bounce 2s infinite;
+        }
+
+        @keyframes bounce {
+            0%, 100% { transform: translateX(-50%) translateY(0); }
+            50% { transform: translateX(-50%) translateY(8px); }
+        }
+
+        /* Sections */
+        section {
+            padding: 6rem 2rem;
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        .section-title {
+            font-size: 2rem;
+            font-weight: 700;
+            color: var(--gold);
+            letter-spacing: 0.1em;
+            text-align: center;
+            margin-bottom: 1rem;
+        }
+
+        .section-subtitle {
+            text-align: center;
+            color: var(--text);
+            margin-bottom: 3rem;
+            font-size: 1rem;
+        }
+
+        /* Screenshots */
+        .screenshots {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 1.5rem;
+            margin-bottom: 2rem;
+        }
+
+        .screenshots img {
+            width: 100%;
+            border-radius: 4px;
+            border: 1px solid rgba(200,170,110,0.2);
+            transition: transform 0.3s;
+        }
+
+        .screenshots img:hover { transform: scale(1.02); }
+
+        .screenshot-label {
+            text-align: center;
+            color: var(--text);
+            font-size: 0.85rem;
+            margin-top: 0.5rem;
+        }
+
+        /* Features */
+        .features-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 2rem;
+        }
+
+        .feature-card {
+            background: var(--panel);
+            border: 1px solid rgba(200,170,110,0.15);
+            padding: 2rem;
+            transition: border-color 0.3s;
+        }
+
+        .feature-card:hover { border-color: var(--gold); }
+
+        .feature-card h3 {
+            color: var(--gold);
+            font-size: 1.1rem;
+            margin-bottom: 0.8rem;
+            letter-spacing: 0.05em;
+        }
+
+        .feature-card p {
+            color: var(--text);
+            font-size: 0.9rem;
+            line-height: 1.6;
+        }
+
+        /* Champions */
+        .champions-grid {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: center;
+            gap: 0.8rem;
+        }
+
+        .champion-tag {
+            padding: 8px 18px;
+            background: rgba(200,155,60,0.08);
+            border: 1px solid rgba(200,170,110,0.2);
+            color: var(--gold-light);
+            font-size: 0.85rem;
+            letter-spacing: 0.05em;
+        }
+
+        /* Stats */
+        .stats-row {
+            display: flex;
+            justify-content: center;
+            gap: 4rem;
+            flex-wrap: wrap;
+            margin: 3rem 0;
+        }
+
+        .stat {
+            text-align: center;
+        }
+
+        .stat-number {
+            font-size: 3rem;
+            font-weight: 900;
+            color: var(--gold);
+        }
+
+        .stat-label {
+            font-size: 0.85rem;
+            color: var(--text);
+            letter-spacing: 0.1em;
+            text-transform: uppercase;
+        }
+
+        /* Tech */
+        .tech-stack {
+            display: flex;
+            justify-content: center;
+            gap: 2rem;
+            flex-wrap: wrap;
+            margin: 2rem 0;
+        }
+
+        .tech-badge {
+            padding: 10px 24px;
+            background: var(--dark-navy);
+            border: 1px solid rgba(200,170,110,0.2);
+            color: var(--text-bright);
+            font-size: 0.9rem;
+            font-weight: 600;
+        }
+
+        /* CTA */
+        .cta {
+            text-align: center;
+            padding: 6rem 2rem;
+            background: linear-gradient(180deg, var(--dark-bg) 0%, var(--dark-navy) 50%, var(--dark-bg) 100%);
+        }
+
+        .cta h2 {
+            font-size: 2.5rem;
+            color: var(--gold);
+            margin-bottom: 1rem;
+        }
+
+        .cta p {
+            color: var(--text);
+            margin-bottom: 2rem;
+            font-size: 1.1rem;
+        }
+
+        /* Footer */
+        footer {
+            text-align: center;
+            padding: 2rem;
+            color: var(--text);
+            font-size: 0.8rem;
+            border-top: 1px solid rgba(200,170,110,0.1);
+        }
+
+        footer a { color: var(--gold-bright); text-decoration: none; }
+        footer a:hover { color: var(--gold-light); }
+
+        /* Divider */
+        .divider {
+            width: 60px;
+            height: 2px;
+            background: var(--gold);
+            margin: 0 auto 3rem;
+        }
+
+        /* Responsive */
+        @media (max-width: 768px) {
+            .hero h1 { font-size: 2.5rem; }
+            .hero h2 { font-size: 1rem; }
+            .features-grid { grid-template-columns: 1fr; }
+            .screenshots { grid-template-columns: 1fr; }
+            .stats-row { gap: 2rem; }
+        }
+    </style>
+</head>
+<body>
+
+    <div class="hero">
+        <div class="hero-content">
+            <h1>TWISTED TREELINE</h1>
+            <h2>3 v 3 &nbsp; A R E N A</h2>
+            <p>The beloved 3v3 game mode returns. An open source recreation of League of Legends' Twisted Treeline, built from scratch in Rust with the Bevy engine.</p>
+            <div class="btn-group">
+                <a href="https://github.com/Louisdelez/LeagueOfLegends-TwistedTreeline" class="btn btn-primary">View on GitHub</a>
+                <a href="https://github.com/Louisdelez/LeagueOfLegends-TwistedTreeline/releases" class="btn btn-secondary">Download</a>
+            </div>
+        </div>
+        <div class="scroll-hint">SCROLL DOWN</div>
+    </div>
+
+    <section>
+        <h2 class="section-title">SCREENSHOTS</h2>
+        <p class="section-subtitle">The Shadow Isles await</p>
+        <div class="divider"></div>
+        <div class="screenshots">
+            <div>
+                <img src="screenshot_game.png" alt="Twisted Treeline 3v3 in-game">
+                <p class="screenshot-label">In-Game &mdash; Twisted Treeline Map</p>
+            </div>
+            <div>
+                <img src="screenshot_menu.png" alt="League of Legends client menu">
+                <p class="screenshot-label">Client &mdash; Styled like the real LoL launcher</p>
+            </div>
+        </div>
+    </section>
+
+    <section>
+        <div class="stats-row">
+            <div class="stat">
+                <div class="stat-number">15</div>
+                <div class="stat-label">Champions</div>
+            </div>
+            <div class="stat">
+                <div class="stat-number">45</div>
+                <div class="stat-label">Items</div>
+            </div>
+            <div class="stat">
+                <div class="stat-number">2300</div>
+                <div class="stat-label">Map Meshes</div>
+            </div>
+            <div class="stat">
+                <div class="stat-number">78</div>
+                <div class="stat-label">Textures</div>
+            </div>
+            <div class="stat">
+                <div class="stat-number">6</div>
+                <div class="stat-label">Jungle Camps</div>
+            </div>
+        </div>
+    </section>
+
+    <section>
+        <h2 class="section-title">FEATURES</h2>
+        <p class="section-subtitle">Faithful recreation of the original game mode</p>
+        <div class="divider"></div>
+        <div class="features-grid">
+            <div class="feature-card">
+                <h3>Full 3D Map</h3>
+                <p>Twisted Treeline rendered from original patch 9.22 NVR data with 78 textures. Two lanes, central jungle, altars, Vilemaw pit, speed shrine.</p>
+            </div>
+            <div class="feature-card">
+                <h3>15 Champions</h3>
+                <p>Real stats from LS4-3x3 server data. Annie, Garen, Ashe, Darius, Lux, Thresh, Jinx, Yasuo, Master Yi, Jax, Teemo, and more.</p>
+            </div>
+            <div class="feature-card">
+                <h3>Combat System</h3>
+                <p>Auto-attacks, abilities (Q/W/E/R), CC (stun/slow/root/silence), armor/MR penetration, kill bounties with real LoL formula.</p>
+            </div>
+            <div class="feature-card">
+                <h3>Bot AI</h3>
+                <p>5 bots (2 allies + 3 enemies) that lane, fight, retreat, and push objectives. Jungle camps with spawn timers and gold/XP rewards.</p>
+            </div>
+            <div class="feature-card">
+                <h3>45 Items</h3>
+                <p>Real item stats and prices. Doran's starters, boots, component items, and finished items for AD, AP, and Tank builds.</p>
+            </div>
+            <div class="feature-card">
+                <h3>Objectives</h3>
+                <p>Vilemaw epic boss, altar capture system with buffs, inhibitor destruction spawns super minions, nexus kill ends the game.</p>
+            </div>
+            <div class="feature-card">
+                <h3>LoL Client UI</h3>
+                <p>Menu styled like the real League of Legends client with Beaufort/Spiegel fonts, real backgrounds, and familiar layout.</p>
+            </div>
+            <div class="feature-card">
+                <h3>Runes & Spells</h3>
+                <p>5 rune paths, 15 keystones, 9 summoner spells (Flash, Ignite, Heal, etc.) with correct cooldowns and effects.</p>
+            </div>
+            <div class="feature-card">
+                <h3>Open Source</h3>
+                <p>MIT licensed. Built in Rust with Bevy 0.18. Modular crate architecture. Contributions welcome from the community.</p>
+            </div>
+        </div>
+    </section>
+
+    <section>
+        <h2 class="section-title">CHAMPIONS</h2>
+        <p class="section-subtitle">Real stats from League of Legends patch 4.20</p>
+        <div class="divider"></div>
+        <div class="champions-grid">
+            <span class="champion-tag">Annie</span>
+            <span class="champion-tag">Garen</span>
+            <span class="champion-tag">Ashe</span>
+            <span class="champion-tag">Darius</span>
+            <span class="champion-tag">Lux</span>
+            <span class="champion-tag">Thresh</span>
+            <span class="champion-tag">Jinx</span>
+            <span class="champion-tag">Yasuo</span>
+            <span class="champion-tag">Master Yi</span>
+            <span class="champion-tag">Jax</span>
+            <span class="champion-tag">Teemo</span>
+            <span class="champion-tag">Singed</span>
+            <span class="champion-tag">Tryndamere</span>
+            <span class="champion-tag">Mordekaiser</span>
+            <span class="champion-tag">Poppy</span>
+        </div>
+    </section>
+
+    <section>
+        <h2 class="section-title">TECH STACK</h2>
+        <div class="divider"></div>
+        <div class="tech-stack">
+            <span class="tech-badge">Rust</span>
+            <span class="tech-badge">Bevy 0.18</span>
+            <span class="tech-badge">Vulkan</span>
+            <span class="tech-badge">UDP Networking</span>
+            <span class="tech-badge">ECS Architecture</span>
+        </div>
+    </section>
+
+    <div class="cta">
+        <h2>BRING BACK THE TREELINE</h2>
+        <p>Join the community effort to recreate the 3v3 arena.</p>
+        <div class="btn-group">
+            <a href="https://github.com/Louisdelez/LeagueOfLegends-TwistedTreeline" class="btn btn-primary">Contribute on GitHub</a>
+        </div>
+    </div>
+
+    <footer>
+        <p>Fan-made project. Not affiliated with Riot Games. League of Legends is a trademark of Riot Games, Inc.</p>
+        <p style="margin-top: 0.5rem;">MIT License &mdash; <a href="https://github.com/Louisdelez/LeagueOfLegends-TwistedTreeline">Source Code</a></p>
+    </footer>
+
+</body>
+</html>
