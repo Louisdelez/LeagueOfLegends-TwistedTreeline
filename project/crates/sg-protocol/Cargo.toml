@@ -1,0 +1,11 @@
+[package]
+name = "sg-protocol"
+description = "Network protocol messages for Shadow Grove"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+bevy = { workspace = true }
+bincode = { workspace = true }
+serde = { workspace = true }
+sg-core = { path = "../sg-core" }

@@ -1,0 +1,9 @@
+[package]
+name = "sg-ai"
+description = "AI for minions, jungle mobs, turrets, and bots"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+bevy = { workspace = true }
+sg-core = { path = "../sg-core" }

@@ -1,0 +1,20 @@
+[package]
+name = "sg-server"
+description = "Authoritative game server"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "sg-server"
+path = "src/main.rs"
+
+[dependencies]
+bevy = { workspace = true }
+bincode = { workspace = true }
+sg-core = { path = "../sg-core" }
+sg-protocol = { path = "../sg-protocol" }
+sg-gameplay = { path = "../sg-gameplay" }
+sg-map = { path = "../sg-map" }
+sg-ai = { path = "../sg-ai" }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }

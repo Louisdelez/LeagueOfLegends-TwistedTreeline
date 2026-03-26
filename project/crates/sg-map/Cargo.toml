@@ -1,0 +1,11 @@
+[package]
+name = "sg-map"
+description = "Map loading, navmesh, spawns, structures for Twisted Treeline"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+bevy = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sg-core = { path = "../sg-core" }

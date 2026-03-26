@@ -1,0 +1,10 @@
+[package]
+name = "sg-gameplay"
+description = "Game mechanics: combat, items, abilities, buffs"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+bevy = { workspace = true }
+serde = { workspace = true }
+sg-core = { path = "../sg-core" }
