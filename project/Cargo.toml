@@ -8,6 +8,7 @@ members = [
     "crates/sg-gameplay",
     "crates/sg-map",
     "crates/sg-ai",
+    "crates/sg-editor",
 ]
 
 [workspace.package]
