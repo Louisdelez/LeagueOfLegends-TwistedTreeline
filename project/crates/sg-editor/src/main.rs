@@ -58,31 +58,56 @@ fn main() {
 
 // ─── Setup ───
 
-fn set_window_icon(mut done: Local<bool>, time: Res<Time>) {
-    if *done || time.elapsed_secs() < 2.0 { return; }
-    *done = true;
-    // Set X11 window icon via python-xlib (most reliable on Linux/X11)
-    std::thread::spawn(|| {
-        let _ = std::process::Command::new("python3").arg("-c").arg(r#"
-from Xlib import display, Xatom
-from PIL import Image
-import subprocess
-d = display.Display()
-r = subprocess.run(["xdotool","search","--name","League of Legends"],capture_output=True,text=True)
-wid = r.stdout.strip().split("\n")[0] if r.stdout.strip() else ""
-if not wid: exit()
-win = d.create_resource_object("window", int(wid))
-img = Image.open("assets/icon.png").resize((64,64)).convert("RGBA")
-w, h = img.size
-data = [w, h]
-for y in range(h):
-    for x in range(w):
-        r,g,b,a = img.getpixel((x,y))
-        data.append((a<<24)|(r<<16)|(g<<8)|b)
-win.change_property(d.intern_atom("_NET_WM_ICON"), Xatom.CARDINAL, 32, data)
-d.flush()
+fn set_window_icon(
+    winit_windows: Option<NonSend<bevy::winit::WinitWindows>>,
+    windows: Query<Entity, With<Window>>,
+    mut done: Local<bool>,
+) {
+    if *done { return; }
+    // Try native winit approach (works on Windows/macOS)
+    if let Some(ref ww) = winit_windows {
+        if let Ok(entity) = windows.single() {
+            if let Some(win) = ww.get_window(entity) {
+                if let Ok(img) = image::open("assets/icon.png") {
+                    let rgba = img.resize(64, 64, image::imageops::FilterType::Lanczos3).to_rgba8();
+                    let (w, h) = (rgba.width(), rgba.height());
+                    if let Ok(icon) = winit::window::Icon::from_rgba(rgba.into_raw(), w, h) {
+                        win.set_window_icon(Some(icon));
+                        *done = true;
+                        return;
+                    }
+                }
+            }
+        }
+    }
+    // Fallback for Linux/X11: use python-xlib if available
+    #[cfg(target_os = "linux")]
+    {
+        *done = true;
+        std::thread::spawn(|| {
+            let _ = std::process::Command::new("python3").arg("-c").arg(r#"
+try:
+    from Xlib import display, Xatom
+    from PIL import Image
+    import subprocess
+    d = display.Display()
+    r = subprocess.run(["xdotool","search","--name","League of Legends"],capture_output=True,text=True)
+    wid = r.stdout.strip().split("\n")[0] if r.stdout.strip() else ""
+    if not wid: exit()
+    win = d.create_resource_object("window", int(wid))
+    img = Image.open("assets/icon.png").resize((64,64)).convert("RGBA")
+    w, h = img.size
+    data = [w, h]
+    for y in range(h):
+        for x in range(w):
+            r,g,b,a = img.getpixel((x,y))
+            data.append((a<<24)|(r<<16)|(g<<8)|b)
+    win.change_property(d.intern_atom("_NET_WM_ICON"), Xatom.CARDINAL, 32, data)
+    d.flush()
+except: pass
 "#).output();
-    });
+        });
+    }
 }
 
 fn setup_camera(mut cmd: Commands) {
@@ -2937,9 +2962,18 @@ fn load_asset_browser(mut browser: ResMut<AssetBrowser>) {
             }
         }
 
-        // Scan everything
-        scan_recursive("/media/louisdelez/SSD500/Workflows/LeagueOfLegends/project", &mut browser.entries);
-        scan_recursive("/media/louisdelez/SSD500/Workflows/LeagueOfLegends/assets", &mut browser.entries);
+        // Scan from current working directory and parent
+        scan_recursive("assets", &mut browser.entries);
+        scan_recursive("crates", &mut browser.entries);
+        // Also try parent directory for assets outside project/
+        if let Ok(cwd) = std::env::current_dir() {
+            if let Some(parent) = cwd.parent() {
+                let parent_assets = parent.join("assets");
+                if parent_assets.exists() {
+                    scan_recursive(&parent_assets.to_string_lossy(), &mut browser.entries);
+                }
+            }
+        }
 
         // Deduplicate by name (keep largest)
         let mut best: HashMap<String, AssetEntry> = HashMap::new();
