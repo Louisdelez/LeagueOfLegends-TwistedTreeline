@@ -69,6 +69,7 @@ impl Plugin for CombatPlugin {
                 hp_mana_regen,
                 tick_damage_popups,
                 draw_damage_popups,
+                draw_level_up_effects,
                 bot_decision,
                 check_inhibitor_destroyed,
                 tick_inhibitor_respawn,
@@ -308,8 +309,12 @@ fn execute_auto_attacks(
 #[derive(Component)]
 struct DamageAmount(f32);
 
+#[derive(Component)]
+struct GoldPopup(f32);
+
 /// Award gold and XP when a minion or jungle camp dies near a champion
 fn gold_and_xp_on_kill(
+    mut commands: Commands,
     game_timer: Res<GameTimer>,
     mut champions: Query<(&Transform, &mut Gold, &mut Champion, &TeamMember, &mut GameStats)>,
     minions: Query<(&Transform, &Health, &Minion, &TeamMember)>,
@@ -325,6 +330,12 @@ fn gold_and_xp_on_kill(
                 gold.0 += g;
                 stats.cs += 1;
                 stats.gold_earned += g;
+                // Gold popup
+                commands.spawn((
+                    Transform::from_translation(minion_tf.translation + Vec3::Y * 120.0),
+                    DamagePopup { lifetime: 0.8, velocity_y: 60.0 },
+                    GoldPopup(g),
+                ));
             }
             if dist < XP_RANGE {
                 let base_xp = kill_xp(1, champion.level);
@@ -373,15 +384,26 @@ fn passive_gold(
 
 /// Level up when XP threshold reached
 fn check_level_up(
-    mut query: Query<&mut Champion>,
+    mut commands: Commands,
+    mut query: Query<(Entity, &Transform, &mut Champion)>,
 ) {
-    for mut champion in &mut query {
+    for (_entity, tf, mut champion) in &mut query {
         let new_level = level_from_xp(champion.xp);
         if new_level > champion.level && new_level <= 18 {
+            let old = champion.level;
             champion.level = new_level;
+            // Level up visual effect
+            commands.spawn((
+                Transform::from_translation(tf.translation + Vec3::Y * 80.0),
+                DamagePopup { lifetime: 1.5, velocity_y: 100.0 },
+                LevelUpEffect(new_level),
+            ));
         }
     }
 }
+
+#[derive(Component)]
+struct LevelUpEffect(u8);
 
 /// Handle champion death — award kill gold/XP with bounty system
 fn handle_champion_death(
@@ -502,16 +524,55 @@ fn tick_damage_popups(
 
 fn draw_damage_popups(
     mut gizmos: Gizmos,
-    popups: Query<(&Transform, &DamagePopup, &DamageAmount)>,
+    damage_popups: Query<(&Transform, &DamagePopup, &DamageAmount)>,
+    gold_popups: Query<(&Transform, &DamagePopup, &GoldPopup)>,
 ) {
-    for (tf, popup, dmg) in &popups {
+    // Damage numbers
+    for (tf, popup, dmg) in &damage_popups {
         let alpha = popup.lifetime.clamp(0.0, 1.0);
-        let color = Color::srgba(1.0, 0.9, 0.1, alpha);
-        // Draw a small sphere as damage indicator
+        let color = if dmg.0 > 200.0 {
+            Color::srgba(1.0, 0.2, 0.1, alpha)
+        } else if dmg.0 > 50.0 {
+            Color::srgba(1.0, 0.8, 0.1, alpha)
+        } else {
+            Color::srgba(1.0, 1.0, 1.0, alpha)
+        };
+        let size = 8.0 + dmg.0 * 0.08;
         gizmos.sphere(
             Isometry3d::from_translation(tf.translation),
-            5.0 + dmg.0 * 0.05, // bigger sphere for more damage
+            size.min(30.0),
             color,
+        );
+    }
+
+    // Gold popups (golden spheres)
+    for (tf, popup, _gold) in &gold_popups {
+        let alpha = popup.lifetime.clamp(0.0, 1.0);
+        gizmos.sphere(
+            Isometry3d::from_translation(tf.translation),
+            12.0,
+            Color::srgba(1.0, 0.85, 0.0, alpha),
+        );
+    }
+}
+
+fn draw_level_up_effects(
+    mut gizmos: Gizmos,
+    effects: Query<(&Transform, &DamagePopup, &LevelUpEffect)>,
+) {
+    for (tf, popup, _lvl) in &effects {
+        let alpha = popup.lifetime.clamp(0.0, 1.0);
+        // Expanding ring effect
+        let ring_size = 50.0 + (1.5 - popup.lifetime) * 100.0;
+        gizmos.circle(
+            Isometry3d::from_translation(tf.translation),
+            ring_size,
+            Color::srgba(0.3, 0.8, 1.0, alpha * 0.8),
+        );
+        gizmos.sphere(
+            Isometry3d::from_translation(tf.translation),
+            20.0,
+            Color::srgba(1.0, 1.0, 0.3, alpha),
         );
     }
 }
