@@ -56,8 +56,17 @@ impl Plugin for CombatPlugin {
                 check_level_up,
                 handle_champion_death,
                 tick_respawn,
+            )
+                .chain()
+                .in_set(GameSet::Combat)
+                .run_if(in_state(AppState::InGame)),
+        )
+            .add_systems(
+            Update,
+            (
                 cleanup_dead_minions,
                 fountain_heal,
+                hp_mana_regen,
                 tick_damage_popups,
                 draw_damage_popups,
                 bot_decision,
@@ -225,14 +234,15 @@ fn execute_auto_attacks(
     time: Res<Time>,
     mut attackers: Query<(
         Entity, &Transform, &CombatStats, &mut AttackCooldown, &AttackTarget, &AutoAttackRange,
+        Option<&mut TurretAggro>, Option<&Structure>,
     ), Without<Stunned>>,
-    mut targets: Query<(&Transform, &mut Health, Option<&CombatStats>), Without<AttackCooldown>>,
+    mut targets: Query<(&Transform, &mut Health, Option<&CombatStats>, Option<&mut crate::ability_plugin::Shield>), Without<AttackCooldown>>,
 ) {
-    for (entity, _atk_tf, stats, mut cooldown, target, _range) in &mut attackers {
+    for (entity, _atk_tf, stats, mut cooldown, target, _range, turret_aggro, structure) in &mut attackers {
         cooldown.0 -= time.delta_secs();
         if cooldown.0 > 0.0 { continue; }
 
-        let Ok((tgt_tf, mut tgt_health, tgt_stats)) = targets.get_mut(target.entity) else {
+        let Ok((tgt_tf, mut tgt_health, tgt_stats, tgt_shield)) = targets.get_mut(target.entity) else {
             commands.entity(entity).remove::<AttackTarget>();
             continue;
         };
@@ -245,11 +255,38 @@ fn execute_auto_attacks(
         cooldown.0 = 1.0 / stats.attack_speed;
 
         let raw_damage = stats.attack_damage;
-        let damage = if let Some(target_stats) = tgt_stats {
+        let mut damage = if let Some(target_stats) = tgt_stats {
             calculate_damage(raw_damage, DamageType::Physical, stats, target_stats)
         } else {
             raw_damage
         };
+
+        // Turret damage ramp: +25% per consecutive hit on same champion (max +75%)
+        if structure.is_some() {
+            if let Some(mut aggro) = turret_aggro {
+                if aggro.last_target == Some(target.entity) {
+                    aggro.consecutive_hits = (aggro.consecutive_hits + 1).min(3);
+                } else {
+                    aggro.consecutive_hits = 0;
+                    aggro.last_target = Some(target.entity);
+                }
+                damage *= 1.0 + 0.25 * aggro.consecutive_hits as f32;
+            }
+        }
+
+        // Shield absorbs damage first
+        if let Some(mut shield) = tgt_shield {
+            if shield.amount > 0.0 {
+                if shield.amount >= damage {
+                    shield.amount -= damage;
+                    damage = 0.0;
+                } else {
+                    damage -= shield.amount;
+                    shield.amount = 0.0;
+                }
+            }
+        }
+
         tgt_health.current -= damage;
 
         // Spawn damage number popup
@@ -497,6 +534,18 @@ fn fountain_heal(
     }
 }
 
+/// Natural HP and Mana regeneration
+fn hp_mana_regen(
+    time: Res<Time>,
+    mut query: Query<(&mut Health, &mut Mana), (With<Champion>, Without<Dead>)>,
+) {
+    let dt = time.delta_secs();
+    for (mut health, mut mana) in &mut query {
+        health.current = (health.current + health.regen * dt).min(health.max);
+        mana.current = (mana.current + mana.regen * dt).min(mana.max);
+    }
+}
+
 /// Check if an inhibitor was destroyed
 fn check_inhibitor_destroyed(
     mut inhib_state: ResMut<InhibitorState>,
@@ -575,76 +624,142 @@ fn bot_decision(
     mut commands: Commands,
     time: Res<Time>,
     map: Res<MapData>,
+    item_db: Res<ItemDatabase>,
     mut bots: Query<(
         Entity, &Transform, &mut BotController, &TeamMember, &Health, &AutoAttackRange,
+        &mut Gold, &CombatStats,
     ), (With<Champion>, Without<Dead>, Without<PlayerControlled>)>,
     potential_targets: Query<(Entity, &Transform, &TeamMember, &Health), (Without<Dead>, Without<BotController>)>,
     enemy_champs: Query<(Entity, &Transform, &TeamMember, &Health), (With<Champion>, Without<Dead>)>,
+    minions: Query<(Entity, &Transform, &TeamMember, &Health), (With<Minion>, Without<Dead>)>,
+    mut inventories: Query<&mut PlayerInventory>,
 ) {
     let dt = time.delta_secs();
 
-    for (entity, tf, mut bot, team, health, range) in &mut bots {
+    for (entity, tf, mut bot, team, health, range, mut gold, _stats) in &mut bots {
         bot.decision_timer -= dt;
         if bot.decision_timer > 0.0 { continue; }
         bot.decision_timer = 0.5;
 
         let pos = Vec2::new(tf.translation.x, tf.translation.z);
         let hp_pct = health.current / health.max;
+        let fountain = if team.0 == Team::Blue { map.0.blue_fountain } else { map.0.red_fountain };
+        let at_fountain = pos.distance(fountain) < 600.0;
+
+        // Shopping: buy best affordable item when at fountain or dead
+        if at_fountain && gold.0 >= 400.0 {
+            if let Ok(mut inv) = inventories.get_mut(entity) {
+                if inv.items.len() < 6 {
+                    // Find most expensive affordable item
+                    let mut best: Option<(u32, u32)> = None; // (id, cost)
+                    for item in &item_db.items {
+                        if item.cost as f32 <= gold.0 && best.map_or(true, |(_, c)| item.cost > c) {
+                            best = Some((item.id, item.cost));
+                        }
+                    }
+                    if let Some((id, cost)) = best {
+                        inv.items.push(id);
+                        gold.0 -= cost as f32;
+                        commands.entity(entity).insert(InventoryChanged);
+                    }
+                }
+            }
+        }
 
         // State transitions
-        if hp_pct < 0.25 && bot.state != BotState::Retreating {
+        if hp_pct < 0.30 && bot.state != BotState::Retreating {
             bot.state = BotState::Retreating;
-        } else if hp_pct > 0.8 && bot.state == BotState::Retreating {
+        } else if hp_pct > 0.80 && bot.state == BotState::Retreating {
             bot.state = BotState::Laning;
         }
 
         match bot.state {
             BotState::Retreating => {
-                let fountain = if team.0 == Team::Blue { map.0.blue_fountain } else { map.0.red_fountain };
                 commands.entity(entity).remove::<AttackTarget>().insert(MoveTarget { position: fountain });
             }
             BotState::Laning | BotState::Fighting => {
-                // Look for enemy champion nearby
+                // Priority 1: Low HP enemy champion nearby (finish them off)
+                let mut low_champ: Option<(Entity, f32, f32)> = None; // (entity, dist, hp_pct)
                 let mut closest_champ: Option<(Entity, f32)> = None;
                 for (e, e_tf, e_team, e_health) in &enemy_champs {
                     if e_team.0 == team.0 || e_health.current <= 0.0 { continue; }
                     let dist = pos.distance(Vec2::new(e_tf.translation.x, e_tf.translation.z));
-                    if dist < 800.0 && closest_champ.map_or(true, |(_, d)| dist < d) {
-                        closest_champ = Some((e, dist));
+                    if dist < 900.0 {
+                        let ehp = e_health.current / e_health.max;
+                        if ehp < 0.4 && low_champ.map_or(true, |(_, _, h)| ehp < h) {
+                            low_champ = Some((e, dist, ehp));
+                        }
+                        if closest_champ.map_or(true, |(_, d)| dist < d) {
+                            closest_champ = Some((e, dist));
+                        }
                     }
                 }
 
-                if let Some((target, _)) = closest_champ {
+                // Priority 2: Last-hit minions (attack weakest enemy minion in range)
+                let mut weakest_minion: Option<(Entity, f32)> = None; // (entity, hp)
+                for (e, e_tf, e_team, e_health) in &minions {
+                    if e_team.0 == team.0 || e_health.current <= 0.0 { continue; }
+                    let dist = pos.distance(Vec2::new(e_tf.translation.x, e_tf.translation.z));
+                    if dist < range.0 + 100.0 && weakest_minion.map_or(true, |(_, h)| e_health.current < h) {
+                        weakest_minion = Some((e, e_health.current));
+                    }
+                }
+
+                // Decision: low champ > any champ in range > weakest minion > push lane
+                if let Some((target, _, _)) = low_champ {
                     bot.state = BotState::Fighting;
                     commands.entity(entity).remove::<MoveTarget>()
                         .insert(AttackTarget { entity: target })
                         .insert(AttackCooldown(0.0));
-                } else {
-                    // Find closest enemy minion/structure
-                    let mut closest: Option<(Entity, f32)> = None;
-                    for (e, e_tf, e_team, e_health) in &potential_targets {
-                        if e_team.0 == team.0 || e_team.0 == Team::Neutral || e_health.current <= 0.0 { continue; }
-                        let dist = pos.distance(Vec2::new(e_tf.translation.x, e_tf.translation.z));
-                        if dist < range.0 + 200.0 && closest.map_or(true, |(_, d)| dist < d) {
-                            closest = Some((e, dist));
-                        }
-                    }
-
-                    if let Some((target, _)) = closest {
+                } else if let Some((target, dist)) = closest_champ {
+                    if dist < range.0 + 50.0 {
                         bot.state = BotState::Fighting;
                         commands.entity(entity).remove::<MoveTarget>()
                             .insert(AttackTarget { entity: target })
                             .insert(AttackCooldown(0.0));
                     } else {
-                        // Push lane
+                        // Move toward enemy champ but don't attack yet
                         bot.state = BotState::Laning;
-                        let dir = if team.0 == Team::Blue { 500.0 } else { -500.0 };
-                        let lane_y = match bot.assigned_lane {
+                    }
+                } else if let Some((target, _)) = weakest_minion {
+                    bot.state = BotState::Laning;
+                    commands.entity(entity).remove::<MoveTarget>()
+                        .insert(AttackTarget { entity: target })
+                        .insert(AttackCooldown(0.0));
+                } else {
+                    // No targets: push lane along waypoints
+                    bot.state = BotState::Laning;
+                    let waypoints = match (team.0, bot.assigned_lane) {
+                        (Team::Blue, sg_core::types::Lane::Top) => &map.0.lane_paths.top_blue,
+                        (Team::Blue, sg_core::types::Lane::Bottom) => &map.0.lane_paths.bottom_blue,
+                        (Team::Red, sg_core::types::Lane::Top) => &map.0.lane_paths.top_red,
+                        (Team::Red, sg_core::types::Lane::Bottom) => &map.0.lane_paths.bottom_red,
+                        _ => &map.0.lane_paths.top_blue,
+                    };
+                    // Find closest waypoint ahead
+                    let forward_dir = if team.0 == Team::Blue { 1.0f32 } else { -1.0 };
+                    let mut best_wp: Option<Vec2> = None;
+                    let mut best_dist = f32::MAX;
+                    for wp in waypoints {
+                        let d = pos.distance(*wp);
+                        let ahead = (wp.x - pos.x) * forward_dir > -200.0;
+                        if ahead && d < best_dist && d > 100.0 {
+                            best_dist = d;
+                            best_wp = Some(*wp);
+                        }
+                    }
+                    if let Some(wp) = best_wp {
+                        commands.entity(entity).insert(MoveTarget { position: wp });
+                    } else {
+                        // Fallback: move toward enemy base
+                        let target_x = if team.0 == Team::Blue { pos.x + 500.0 } else { pos.x - 500.0 };
+                        let lane_z = match bot.assigned_lane {
                             sg_core::types::Lane::Top => 9500.0,
                             sg_core::types::Lane::Bottom => 5000.0,
                         };
-                        let target = Vec2::new((pos.x + dir).clamp(500.0, 14900.0), lane_y);
-                        commands.entity(entity).insert(MoveTarget { position: target });
+                        commands.entity(entity).insert(MoveTarget {
+                            position: Vec2::new(target_x.clamp(500.0, 14900.0), lane_z),
+                        });
                     }
                 }
             }

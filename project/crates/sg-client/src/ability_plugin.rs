@@ -2,7 +2,7 @@ use bevy::prelude::*;
 use sg_core::components::*;
 use sg_core::types::*;
 use sg_core::GameSet;
-use sg_gameplay::champions::ChampionClass;
+use sg_gameplay::champions::{ChampionClass, ChampionId, get_champion_by_id};
 use crate::menu::AppState;
 
 pub struct AbilityPlugin;
@@ -67,6 +67,10 @@ impl Default for AbilityCooldowns {
 #[derive(Component)]
 pub struct ChampionKit(pub ChampionClass);
 
+/// Champion identity for ability stats lookup
+#[derive(Component)]
+pub struct ChampionIdentity(pub ChampionId);
+
 fn ability_input(
     mut commands: Commands,
     keys: Res<ButtonInput<KeyCode>>,
@@ -74,19 +78,25 @@ fn ability_input(
     windows: Query<&Window>,
     camera_q: Query<(&Camera, &GlobalTransform)>,
     mut player_q: Query<
-        (Entity, &Transform, &TeamMember, &CombatStats, &mut AbilityCooldowns, &mut Mana, Option<&ChampionKit>),
+        (Entity, &Transform, &TeamMember, &CombatStats, &mut AbilityCooldowns, &mut Mana, Option<&ChampionKit>, Option<&ChampionIdentity>, &Champion),
         (With<PlayerControlled>, Without<Dead>),
     >,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
-    let Ok((player_entity, player_tf, team, stats, mut cds, mut mana, kit_opt)) = player_q.single_mut() else { return };
+    let Ok((player_entity, player_tf, team, stats, mut cds, mut mana, kit_opt, champ_id_opt, champion)) = player_q.single_mut() else { return };
     let dt = time.delta_secs();
     let kit = kit_opt.map(|k| k.0).unwrap_or(ChampionClass::Mage);
 
-    // Mana costs per ability
+    // Get champion-specific stats if available
+    let champ_def = champ_id_opt.map(|id| get_champion_by_id(id.0));
+    let level = champion.level as usize;
+    let rank_q = (level / 2).min(4); // ability rank scales with level
+    let rank_r = if level >= 16 { 2 } else if level >= 11 { 1 } else { 0 };
+
+    // Use champion-specific mana costs or defaults
     let mana_costs = match kit {
-        ChampionClass::Mage => [60.0, 80.0, 50.0, 100.0],    // Q, W, E, R
+        ChampionClass::Mage => [60.0, 80.0, 50.0, 100.0],
         ChampionClass::Fighter => [40.0, 50.0, 45.0, 80.0],
         ChampionClass::Tank => [50.0, 60.0, 55.0, 90.0],
     };
@@ -108,33 +118,32 @@ fn ability_input(
 
     // === Q ===
     if keys.just_pressed(KeyCode::KeyA) && cds.q <= 0.0 && mana.current >= mana_costs[0] {
+        let (q_cd, q_dmg, q_ratio) = if let Some(ref def) = champ_def {
+            (def.q_cd[rank_q], def.q_dmg[rank_q], def.q_ap_ratio)
+        } else {
+            match kit { ChampionClass::Mage => (5.0, 80.0, 0.65), ChampionClass::Fighter => (6.0, 60.0, 0.8), ChampionClass::Tank => (8.0, 40.0, 0.3) }
+        };
+        let q_total = q_dmg + if kit == ChampionClass::Fighter { stats.attack_damage * q_ratio } else { stats.ability_power * q_ratio };
+        cds.q = q_cd;
+        mana.current -= mana_costs[0];
         match kit {
             ChampionClass::Mage => {
-                // Fireball skillshot
-                cds.q = 5.0;
-                mana.current -= mana_costs[0];
                 spawn_skillshot(&mut commands, &mut meshes, &mut materials,
-                    player_pos, direction, 2000.0, 80.0 + stats.ability_power * 0.65, 1200.0, team.0,
+                    player_pos, direction, 2000.0, q_total, 1200.0, team.0,
                     Color::srgb(0.3, 0.5, 1.0), [0.5, 1.0, 3.0]);
             }
             ChampionClass::Fighter => {
-                // Lunge Strike: dash forward + damage at arrival
-                cds.q = 6.0;
-                mana.current -= mana_costs[0];
                 let dash_target = player_pos + direction * 300.0;
                 commands.entity(player_entity).remove::<AttackTarget>().insert(
                     MoveTarget { position: Vec2::new(dash_target.x, dash_target.z) }
                 );
                 spawn_aoe(&mut commands, &mut meshes, &mut materials,
-                    dash_target, 120.0, 60.0 + stats.attack_damage * 0.8, 0.3, team.0,
+                    dash_target, 120.0, q_total, 0.3, team.0,
                     Color::srgba(0.9, 0.5, 0.1, 0.4), [2.0, 0.5, 0.0]);
             }
             ChampionClass::Tank => {
-                // Provoke: small AOE taunt (damage + stun)
-                cds.q = 8.0;
-                mana.current -= mana_costs[0];
                 spawn_aoe_cc(&mut commands, &mut meshes, &mut materials,
-                    player_pos, 200.0, 40.0 + stats.ability_power * 0.3, 0.5, team.0,
+                    player_pos, 200.0, q_total, 0.5, team.0,
                     Color::srgba(0.4, 0.7, 0.3, 0.3), [0.5, 1.0, 0.2],
                     Some(sg_core::BuffType::Stun), 1.5);
             }
@@ -143,65 +152,58 @@ fn ability_input(
 
     // === W ===
     if keys.just_pressed(KeyCode::KeyW) && cds.w <= 0.0 && mana.current >= mana_costs[1] {
+        let (w_cd, w_dmg, w_ratio) = if let Some(ref def) = champ_def {
+            (def.w_cd[rank_q], def.w_dmg[rank_q], def.w_ap_ratio)
+        } else {
+            match kit { ChampionClass::Mage => (8.0, 120.0, 0.7), ChampionClass::Fighter => (12.0, 80.0, 0.5), ChampionClass::Tank => (14.0, 100.0, 0.3) }
+        };
+        cds.w = w_cd;
+        mana.current -= mana_costs[1];
         match kit {
             ChampionClass::Mage => {
-                // Inferno Zone at cursor
-                cds.w = 8.0;
-                mana.current -= mana_costs[1];
+                let w_total = w_dmg + stats.ability_power * w_ratio;
                 spawn_aoe(&mut commands, &mut meshes, &mut materials,
-                    target_pos, 150.0, 120.0 + stats.ability_power * 0.7, 0.5, team.0,
+                    target_pos, 150.0, w_total, 0.5, team.0,
                     Color::srgba(0.9, 0.3, 0.1, 0.4), [2.0, 0.5, 0.0]);
             }
             ChampionClass::Fighter => {
-                // Iron Will: shield self
-                cds.w = 12.0;
-                mana.current -= mana_costs[1];
-                let shield_amount = 80.0 + stats.attack_damage * 0.5;
-                commands.entity(player_entity).insert(Shield {
-                    amount: shield_amount,
-                    remaining: 4.0,
-                });
+                let shield_amount = w_dmg + stats.attack_damage * w_ratio;
+                commands.entity(player_entity).insert(Shield { amount: shield_amount, remaining: 4.0 });
             }
             ChampionClass::Tank => {
-                // Fortress: armor/MR buff (simplified as temporary shield)
-                cds.w = 14.0;
-                mana.current -= mana_costs[1];
-                let shield_amount = 100.0 + stats.armor * 0.3 + stats.magic_resist * 0.3;
-                commands.entity(player_entity).insert(Shield {
-                    amount: shield_amount,
-                    remaining: 5.0,
-                });
+                let shield_amount = w_dmg + stats.armor * 0.3 + stats.magic_resist * 0.3;
+                commands.entity(player_entity).insert(Shield { amount: shield_amount, remaining: 5.0 });
             }
         }
     }
 
     // === E ===
     if keys.just_pressed(KeyCode::KeyE) && cds.e <= 0.0 && mana.current >= mana_costs[2] {
+        let (e_cd, e_dmg, e_ratio) = if let Some(ref def) = champ_def {
+            (def.e_cd[rank_q], def.e_dmg[rank_q], def.e_ad_ratio)
+        } else {
+            match kit { ChampionClass::Mage => (14.0, 0.0, 0.0), ChampionClass::Fighter => (10.0, 70.0, 0.6), ChampionClass::Tank => (12.0, 60.0, 0.5) }
+        };
+        cds.e = e_cd;
+        mana.current -= mana_costs[2];
         match kit {
             ChampionClass::Mage => {
-                // Arcane Shift: blink toward cursor
-                cds.e = 14.0;
-                mana.current -= mana_costs[2];
                 let dash_target = player_pos + direction * 400.0;
                 commands.entity(player_entity).remove::<AttackTarget>().insert(
                     MoveTarget { position: Vec2::new(dash_target.x, dash_target.z) }
                 );
             }
             ChampionClass::Fighter => {
-                // Hammer Slam: skillshot stun
-                cds.e = 10.0;
-                mana.current -= mana_costs[2];
+                let e_total = e_dmg + stats.attack_damage * e_ratio;
                 spawn_skillshot_cc(&mut commands, &mut meshes, &mut materials,
-                    player_pos, direction, 1500.0, 70.0 + stats.attack_damage * 0.6, 800.0, team.0,
+                    player_pos, direction, 1500.0, e_total, 800.0, team.0,
                     Color::srgb(0.8, 0.4, 0.1), [1.5, 0.5, 0.0],
                     Some(sg_core::BuffType::Stun), 1.0);
             }
             ChampionClass::Tank => {
-                // Tremor: slow zone at cursor
-                cds.e = 12.0;
-                mana.current -= mana_costs[2];
+                let e_total = e_dmg + stats.attack_damage * e_ratio;
                 spawn_aoe_cc(&mut commands, &mut meshes, &mut materials,
-                    target_pos, 200.0, 60.0 + stats.attack_damage * 0.5, 1.0, team.0,
+                    target_pos, 200.0, e_total, 1.0, team.0,
                     Color::srgba(0.5, 0.4, 0.2, 0.3), [0.8, 0.5, 0.1],
                     Some(sg_core::BuffType::Slow { percent: 0.4 }), 2.0);
             }
@@ -210,29 +212,28 @@ fn ability_input(
 
     // === R ===
     if keys.just_pressed(KeyCode::KeyR) && cds.r <= 0.0 && mana.current >= mana_costs[3] {
+        let (r_cd, r_dmg, r_ratio) = if let Some(ref def) = champ_def {
+            (def.r_cd[rank_r], def.r_dmg[rank_r], def.r_ap_ratio)
+        } else {
+            match kit { ChampionClass::Mage => (90.0, 250.0, 0.9), ChampionClass::Fighter => (100.0, 150.0, 0.6), ChampionClass::Tank => (120.0, 200.0, 0.6) }
+        };
+        let r_total = r_dmg + if kit == ChampionClass::Fighter { stats.attack_damage * r_ratio } else { stats.ability_power * r_ratio };
+        cds.r = r_cd;
+        mana.current -= mana_costs[3];
         match kit {
             ChampionClass::Mage => {
-                // Pyroclasm: massive AOE around self
-                cds.r = 90.0;
-                mana.current -= mana_costs[3];
                 spawn_aoe(&mut commands, &mut meshes, &mut materials,
-                    player_pos, 300.0, 250.0 + stats.ability_power * 0.9, 0.3, team.0,
+                    player_pos, 300.0, r_total, 0.3, team.0,
                     Color::srgba(0.8, 0.1, 0.1, 0.3), [3.0, 0.0, 0.0]);
             }
             ChampionClass::Fighter => {
-                // Berserker Fury: self-buff AOE damage over time
-                cds.r = 100.0;
-                mana.current -= mana_costs[3];
                 spawn_aoe(&mut commands, &mut meshes, &mut materials,
-                    player_pos, 250.0, 150.0 + stats.attack_damage * 0.6, 2.0, team.0,
+                    player_pos, 250.0, r_total, 2.0, team.0,
                     Color::srgba(0.9, 0.3, 0.0, 0.3), [2.0, 0.3, 0.0]);
             }
             ChampionClass::Tank => {
-                // Earthshatter: huge AOE knockup (stun)
-                cds.r = 120.0;
-                mana.current -= mana_costs[3];
                 spawn_aoe_cc(&mut commands, &mut meshes, &mut materials,
-                    player_pos, 350.0, 200.0 + stats.ability_power * 0.6, 0.5, team.0,
+                    player_pos, 350.0, r_total, 0.5, team.0,
                     Color::srgba(0.3, 0.5, 0.2, 0.4), [0.5, 1.5, 0.2],
                     Some(sg_core::BuffType::Stun), 1.5);
             }
