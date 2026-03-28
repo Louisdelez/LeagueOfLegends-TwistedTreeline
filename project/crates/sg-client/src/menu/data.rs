@@ -88,6 +88,7 @@ pub struct PlayerProfile {
     pub spell_d: SummonerSpell,
     pub spell_f: SummonerSpell,
     pub preferred_champion: Option<ChampionClass>,
+    pub selected_champion_id: Option<sg_gameplay::champions::ChampionId>,
     pub match_history: Vec<MatchResult>,
 }
 
@@ -104,6 +105,7 @@ impl Default for PlayerProfile {
             spell_d: SummonerSpell::Flash,
             spell_f: SummonerSpell::Ignite,
             preferred_champion: None,
+            selected_champion_id: None,
             match_history: vec![],
         }
     }
