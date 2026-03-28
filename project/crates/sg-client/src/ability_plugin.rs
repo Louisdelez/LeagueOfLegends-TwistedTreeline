@@ -1,4 +1,5 @@
 use bevy::prelude::*;
+use bevy::scene::SceneRoot;
 use sg_core::components::*;
 use sg_core::types::*;
 use sg_core::GameSet;
@@ -14,6 +15,7 @@ impl Plugin for AbilityPlugin {
             process_skillshots,
             process_aoe_effects,
             tick_shields,
+            tick_tibbers,
         ).chain().in_set(GameSet::Combat).run_if(in_state(AppState::InGame)));
     }
 }
@@ -67,6 +69,10 @@ impl Default for AbilityCooldowns {
 #[derive(Component)]
 pub struct ChampionKit(pub ChampionClass);
 
+/// Tibbers pet with limited lifetime
+#[derive(Component)]
+pub struct TibbersPet { pub lifetime: f32 }
+
 /// Champion identity for ability stats lookup
 #[derive(Component)]
 pub struct ChampionIdentity(pub ChampionId);
@@ -75,6 +81,7 @@ fn ability_input(
     mut commands: Commands,
     keys: Res<ButtonInput<KeyCode>>,
     time: Res<Time>,
+    asset_server: Res<AssetServer>,
     windows: Query<&Window>,
     camera_q: Query<(&Camera, &GlobalTransform)>,
     mut player_q: Query<
@@ -222,9 +229,43 @@ fn ability_input(
         mana.current -= mana_costs[3];
         match kit {
             ChampionClass::Mage => {
+                // AOE damage at target
                 spawn_aoe(&mut commands, &mut meshes, &mut materials,
-                    player_pos, 300.0, r_total, 0.3, team.0,
+                    target_pos, 300.0, r_total, 0.3, team.0,
                     Color::srgba(0.8, 0.1, 0.1, 0.3), [3.0, 0.0, 0.0]);
+
+                // Annie special: spawn Tibbers pet
+                if champ_id_opt.map(|id| id.0) == Some(ChampionId::Annie) {
+                    let tibbers_mesh = meshes.add(Sphere::new(40.0));
+                    let tibbers_mat = materials.add(StandardMaterial {
+                        base_color: Color::srgb(0.4, 0.2, 0.1),
+                        emissive: bevy::color::LinearRgba::rgb(1.0, 0.3, 0.0),
+                        ..default()
+                    });
+                    let tibbers = commands.spawn((
+                        Mesh3d(tibbers_mesh), MeshMaterial3d(tibbers_mat),
+                        Transform::from_translation(target_pos + Vec3::Y * 40.0),
+                        sg_core::components::TeamMember(team.0),
+                        sg_core::components::Health { current: 1200.0, max: 1200.0, regen: 0.0 },
+                        sg_core::components::CombatStats {
+                            attack_damage: 80.0 + stats.ability_power * 0.15,
+                            ability_power: 0.0, armor: 30.0, magic_resist: 30.0,
+                            attack_speed: 0.8, move_speed: 350.0,
+                            crit_chance: 0.0, cdr: 0.0, armor_pen_flat: 0.0, armor_pen_pct: 0.0,
+                            magic_pen_flat: 0.0, magic_pen_pct: 0.0, life_steal: 0.0, spell_vamp: 0.0,
+                        },
+                        sg_core::components::AutoAttackRange(200.0),
+                        sg_core::components::AttackCooldown(0.0),
+                        TibbersPet { lifetime: 45.0 },
+                    )).id();
+                    // Load Tibbers model
+                    commands.entity(tibbers).with_children(|parent| {
+                        parent.spawn((
+                            SceneRoot(asset_server.load("models/champions/tibbers.glb#Scene0")),
+                            Transform::from_translation(Vec3::new(0.0, -40.0, 0.0)),
+                        ));
+                    });
+                }
             }
             ChampionClass::Fighter => {
                 spawn_aoe(&mut commands, &mut meshes, &mut materials,
@@ -382,6 +423,20 @@ fn tick_shields(
         shield.remaining -= dt;
         if shield.remaining <= 0.0 {
             commands.entity(entity).remove::<Shield>();
+        }
+    }
+}
+
+/// Tick Tibbers lifetime and despawn when expired
+fn tick_tibbers(
+    mut commands: Commands,
+    time: Res<Time>,
+    mut tibbers: Query<(Entity, &mut TibbersPet, &Health)>,
+) {
+    for (entity, mut pet, health) in &mut tibbers {
+        pet.lifetime -= time.delta_secs();
+        if pet.lifetime <= 0.0 || health.current <= 0.0 {
+            commands.entity(entity).despawn_recursive();
         }
     }
 }
