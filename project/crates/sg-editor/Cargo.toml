@@ -7,10 +7,19 @@ edition = "2024"
 name = "sg-editor"
 path = "src/main.rs"
 
+[[bin]]
+name = "test-egui"
+path = "src/test_egui.rs"
+
 [dependencies]
 bevy = "0.18"
-bevy_egui = "0.39"
+bevy_egui = { version = "0.39", default-features = false, features = ["render", "default_fonts", "manage_clipboard", "open_url"] }
 sg-core = { path = "../sg-core" }
 sg-map = { path = "../sg-map" }
 serde_json = "1"
 serde = { version = "1", features = ["derive"] }
+lucide-icons = "0.575"
+rand = "0.9"
+image = "0.25"
+noise = "0.9"
+winit = "0.30"

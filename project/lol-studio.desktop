@@ -1,0 +1,8 @@
+[Desktop Entry]
+Name=League of Legends Studio
+Comment=Terrain & Map Editor for Twisted Treeline
+Exec=/media/louisdelez/SSD500/Workflows/LeagueOfLegends/project/target/debug/sg-editor
+Icon=/media/louisdelez/SSD500/Workflows/LeagueOfLegends/project/assets/icon.png
+Terminal=false
+Type=Application
+Categories=Development;Graphics;
