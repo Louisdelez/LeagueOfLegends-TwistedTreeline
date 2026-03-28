@@ -13,7 +13,7 @@ impl Plugin for HudPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(bevy_hui::HuiPlugin)
             .add_systems(OnEnter(AppState::InGame), setup_hud)
-            .add_systems(Update, (update_hud_properties, sys_world_hp, draw_minimap).run_if(in_state(AppState::InGame)));
+            .add_systems(Update, (update_hud_properties, sys_world_hp, draw_minimap, draw_scoreboard, draw_death_timer).run_if(in_state(AppState::InGame)));
     }
 }
 
@@ -149,6 +149,94 @@ fn draw_minimap(
     let px = (player_pos.x / map_size) * mm_size + mm_center.x - mm_size / 2.0;
     let pz = (player_pos.z / map_size) * mm_size + mm_center.z - mm_size / 2.0;
     g.sphere(Isometry3d::from_translation(Vec3::new(px, mm_y + 10.0, pz)), 50.0, Color::srgb(0.3, 1.0, 0.3));
+}
+
+/// Tab scoreboard: show all champions stats when Tab is held
+fn draw_scoreboard(
+    mut g: Gizmos,
+    keys: Res<ButtonInput<KeyCode>>,
+    champions: Query<(&Champion, &TeamMember, &Health, &Gold, Option<&GameStats>)>,
+    player: Query<(&TeamMember, &Transform), With<PlayerControlled>>,
+) {
+    if !keys.pressed(KeyCode::Tab) { return; }
+
+    let my_team = player.iter().next().map(|(t, _)| t.0).unwrap_or(Team::Blue);
+    let cam_pos = player.iter().next().map(|(_, t)| t.translation).unwrap_or(Vec3::ZERO);
+
+    // Draw scoreboard as gizmo lines in world space above player
+    let base = cam_pos + Vec3::new(0.0, 800.0, -500.0);
+    let mut y_offset = 0.0;
+
+    // Header
+    let header_col = Color::srgba(0.9, 0.85, 0.4, 0.9);
+    g.sphere(Isometry3d::from_translation(base + Vec3::new(0.0, y_offset, 0.0)), 15.0, header_col);
+    y_offset -= 60.0;
+
+    for (champ, team, health, gold, stats_opt) in &champions {
+        let col = if team.0 == my_team {
+            Color::srgba(0.2, 0.6, 1.0, 0.8)
+        } else {
+            Color::srgba(1.0, 0.3, 0.2, 0.8)
+        };
+
+        let pos = base + Vec3::new(0.0, y_offset, 0.0);
+
+        // Name dot (color = team)
+        g.sphere(Isometry3d::from_translation(pos), 10.0, col);
+
+        // Level indicator (size = level)
+        g.sphere(Isometry3d::from_translation(pos + Vec3::new(150.0, 0.0, 0.0)), 5.0 + champ.level as f32, Color::srgba(1.0, 0.9, 0.3, 0.7));
+
+        // HP bar
+        let hp_pct = (health.current / health.max).clamp(0.0, 1.0);
+        let bar_w = 200.0;
+        g.line(pos + Vec3::new(250.0, 0.0, 0.0), pos + Vec3::new(250.0 + bar_w, 0.0, 0.0), Color::srgba(0.2, 0.2, 0.2, 0.6));
+        g.line(pos + Vec3::new(250.0, 0.0, 0.0), pos + Vec3::new(250.0 + bar_w * hp_pct, 0.0, 0.0), Color::srgba(0.1, 0.8, 0.1, 0.8));
+
+        // Gold dot
+        g.sphere(Isometry3d::from_translation(pos + Vec3::new(500.0, 0.0, 0.0)), 5.0 + (gold.0 / 500.0).min(10.0), Color::srgba(1.0, 0.85, 0.0, 0.7));
+
+        // KDA dots (kills = green, deaths = red)
+        if let Some(stats) = stats_opt {
+            for k in 0..stats.kills.min(10) {
+                g.sphere(Isometry3d::from_translation(pos + Vec3::new(600.0 + k as f32 * 15.0, 0.0, 0.0)), 5.0, Color::srgba(0.2, 1.0, 0.2, 0.8));
+            }
+            for d in 0..stats.deaths.min(10) {
+                g.sphere(Isometry3d::from_translation(pos + Vec3::new(600.0 + d as f32 * 15.0, -15.0, 0.0)), 5.0, Color::srgba(1.0, 0.2, 0.2, 0.8));
+            }
+        }
+
+        y_offset -= 50.0;
+    }
+}
+
+/// Death timer: show countdown when player is dead
+fn draw_death_timer(
+    mut g: Gizmos,
+    player_dead: Query<(&Dead, &Transform), With<PlayerControlled>>,
+) {
+    for (dead, tf) in &player_dead {
+        let timer = dead.respawn_timer;
+        // Big pulsing sphere above corpse position
+        let pulse = 1.0 + (timer * 3.0).sin() * 0.3;
+        let size = 80.0 * pulse;
+        let pos = tf.translation + Vec3::Y * 300.0;
+        let alpha = 0.6 + (timer * 2.0).sin().abs() * 0.3;
+
+        // Gray death sphere
+        g.sphere(Isometry3d::from_translation(pos), size, Color::srgba(0.5, 0.5, 0.6, alpha));
+
+        // Timer indicator rings (one per second remaining)
+        let secs = timer.ceil() as u32;
+        for i in 0..secs.min(10) {
+            let ring_r = 40.0 + i as f32 * 25.0;
+            g.circle(
+                Isometry3d::from_translation(pos),
+                ring_r,
+                Color::srgba(0.4, 0.4, 0.5, alpha * 0.3),
+            );
+        }
+    }
 }
 
 fn sys_world_hp(mut g: Gizmos, e: Query<(&Transform, &Health, &TeamMember)>, p: Query<&TeamMember, With<PlayerControlled>>) {

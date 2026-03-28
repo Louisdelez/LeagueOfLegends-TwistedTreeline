@@ -436,7 +436,7 @@ fn tick_tibbers(
     for (entity, mut pet, health) in &mut tibbers {
         pet.lifetime -= time.delta_secs();
         if pet.lifetime <= 0.0 || health.current <= 0.0 {
-            commands.entity(entity).despawn_recursive();
+            commands.entity(entity).despawn();
         }
     }
 }
