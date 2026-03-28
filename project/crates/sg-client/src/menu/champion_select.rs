@@ -2,14 +2,14 @@ use bevy::prelude::*;
 use super::{AppState, MenuUI};
 use super::styles::*;
 use super::data::*;
-use sg_gameplay::champions::{ChampionClass, get_champion};
+use sg_gameplay::champions::{ChampionClass, ChampionId, get_champion, get_champion_by_id};
 use sg_core::spells::SummonerSpell;
 
 #[derive(Resource)]
 pub struct ChampSelectState {
     pub phase: SelectPhase,
     pub timer: f32,
-    pub selected_champion: Option<ChampionClass>,
+    pub selected_champion: Option<ChampionId>,
     pub locked_in: bool,
     pub bans: Vec<ChampionClass>,
     pub ally_picks: Vec<Option<ChampionClass>>,
@@ -34,7 +34,7 @@ impl Default for ChampSelectState {
     }
 }
 
-#[derive(Component)] pub struct ChampCard(pub ChampionClass);
+#[derive(Component)] pub struct ChampCard(pub ChampionId);
 #[derive(Component)] pub struct LockInButton;
 #[derive(Component)] pub struct TimerText;
 #[derive(Component)] pub struct PhaseText;
@@ -100,26 +100,24 @@ pub fn setup(mut commands: Commands, profile: Res<PlayerProfile>, asset_server: 
                 });
 
                 // Champion cards
-                center.spawn(Node { flex_direction: FlexDirection::Row, flex_wrap: FlexWrap::Wrap, column_gap: Val::Px(15.0), row_gap: Val::Px(15.0), ..default() }).with_children(|grid| {
-                    for class in [ChampionClass::Mage, ChampionClass::Fighter, ChampionClass::Tank] {
-                        let def = get_champion(class);
-                        let portrait_path = match class {
+                center.spawn(Node { flex_direction: FlexDirection::Row, flex_wrap: FlexWrap::Wrap, column_gap: Val::Px(10.0), row_gap: Val::Px(10.0), justify_content: JustifyContent::Center, ..default() }).with_children(|grid| {
+                    for &champ_id in ChampionId::all() {
+                        let def = get_champion_by_id(champ_id);
+                        let portrait_path = match def.class {
                             ChampionClass::Mage => "ui/portraits/annie.png",
-                            ChampionClass::Fighter => "ui/portraits/garen.png",
-                            ChampionClass::Tank => "ui/portraits/annie.png",
+                            _ => "ui/portraits/garen.png",
                         };
 
                         grid.spawn((
-                            Node { width: Val::Px(180.0), height: Val::Px(220.0), flex_direction: FlexDirection::Column, align_items: AlignItems::Center, padding: UiRect::all(Val::Px(8.0)), row_gap: Val::Px(5.0), border: UiRect::all(Val::Px(2.0)), ..default() },
-                            BackgroundColor(PANEL_BG_ALPHA), BorderColor::all(BORDER_GRAY), Interaction::default(), ChampCard(class),
+                            Node { width: Val::Px(110.0), height: Val::Px(150.0), flex_direction: FlexDirection::Column, align_items: AlignItems::Center, padding: UiRect::all(Val::Px(5.0)), row_gap: Val::Px(3.0), border: UiRect::all(Val::Px(2.0)), ..default() },
+                            BackgroundColor(PANEL_BG_ALPHA), BorderColor::all(BORDER_GRAY), Interaction::default(), ChampCard(champ_id),
                         )).with_children(|card| {
                             card.spawn((
-                                Node { width: Val::Px(120.0), height: Val::Px(120.0), ..default() },
+                                Node { width: Val::Px(80.0), height: Val::Px(80.0), ..default() },
                                 ImageNode::new(asset_server.load(portrait_path)),
                             ));
-                            card.spawn((Text::new(def.name), heading_font(&fonts, FONT_BODY), TextColor(GOLD_LIGHT)));
-                            card.spawn((Text::new(def.title), body_font(&fonts, FONT_TINY), TextColor(TEXT_WHITE)));
-                            let class_label = match class { ChampionClass::Mage => "Mage", ChampionClass::Fighter => "Fighter", ChampionClass::Tank => "Tank" };
+                            card.spawn((Text::new(def.name), heading_font(&fonts, FONT_SMALL), TextColor(GOLD_LIGHT)));
+                            let class_label = match def.class { ChampionClass::Mage => "Mage", ChampionClass::Fighter => "Fighter", ChampionClass::Tank => "Tank" };
                             card.spawn((Text::new(class_label), body_font(&fonts, FONT_TINY), TextColor(BLUE_ACCENT)));
                         });
                     }
@@ -216,9 +214,12 @@ pub fn interactions(
             }
             SelectPhase::Finalization => {
                 if state.selected_champion.is_none() {
-                    state.selected_champion = Some(ChampionClass::Mage);
+                    state.selected_champion = Some(ChampionId::Annie);
                 }
-                profile.preferred_champion = state.selected_champion;
+                let champ_id = state.selected_champion.unwrap();
+                let def = get_champion_by_id(champ_id);
+                profile.preferred_champion = Some(def.class);
+                profile.selected_champion_id = Some(champ_id);
                 profile.spell_d = state.spell_d;
                 profile.spell_f = state.spell_f;
                 next_state.set(AppState::Loading);
@@ -229,7 +230,7 @@ pub fn interactions(
     for (interaction, card) in &champ_q {
         if *interaction == Interaction::Pressed {
             state.selected_champion = Some(card.0);
-            let def = get_champion(card.0);
+            let def = get_champion_by_id(card.0);
             if let Ok(mut text) = champ_text.single_mut() {
                 **text = format!("{} \u{2014} {}", def.name, def.title);
             }

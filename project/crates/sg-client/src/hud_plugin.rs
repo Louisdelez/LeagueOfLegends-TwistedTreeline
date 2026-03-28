@@ -13,7 +13,7 @@ impl Plugin for HudPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(bevy_hui::HuiPlugin)
             .add_systems(OnEnter(AppState::InGame), setup_hud)
-            .add_systems(Update, (update_hud_properties, sys_world_hp).run_if(in_state(AppState::InGame)));
+            .add_systems(Update, (update_hud_properties, sys_world_hp, draw_minimap).run_if(in_state(AppState::InGame)));
     }
 }
 
@@ -101,6 +101,54 @@ fn update_hud_properties(
 
         cmd.trigger(CompileContextEvent { entity });
     }
+}
+
+/// Minimap: draw unit positions as colored dots in bottom-right
+/// Draw minimap as gizmo dots in a fixed world position
+fn draw_minimap(
+    mut g: Gizmos,
+    units: Query<(&Transform, &TeamMember, &Health, Option<&Visible>)>,
+    player_q: Query<(&TeamMember, &Transform), With<PlayerControlled>>,
+) {
+    let my_team = player_q.iter().next().map(|(t, _)| t.0).unwrap_or(Team::Blue);
+    let player_pos = player_q.iter().next().map(|(_, t)| t.translation).unwrap_or(Vec3::ZERO);
+
+    let map_size = 15398.0f32;
+    let mm_size = 200.0;
+    // Place minimap in world space above the player's approximate area
+    let mm_y = 2500.0;
+    let mm_center = Vec3::new(map_size / 2.0, mm_y, map_size / 2.0);
+
+    // Draw units as colored spheres on the minimap plane
+    for (tf, team, health, visible) in &units {
+        if health.current <= 0.0 { continue; }
+
+        // Fog: hide enemies not visible
+        if team.0 != my_team && team.0 != Team::Neutral {
+            if let Some(vis) = visible {
+                let can_see = if my_team == Team::Blue { vis.to_blue } else { vis.to_red };
+                if !can_see { continue; }
+            }
+        }
+
+        let mx = (tf.translation.x / map_size) * mm_size + mm_center.x - mm_size / 2.0;
+        let mz = (tf.translation.z / map_size) * mm_size + mm_center.z - mm_size / 2.0;
+
+        let color = if team.0 == my_team {
+            Color::srgb(0.2, 0.7, 1.0)
+        } else if team.0 == Team::Neutral {
+            Color::srgb(0.9, 0.9, 0.2)
+        } else {
+            Color::srgb(1.0, 0.2, 0.2)
+        };
+
+        g.sphere(Isometry3d::from_translation(Vec3::new(mx, mm_y, mz)), 30.0, color);
+    }
+
+    // Player indicator (larger, brighter)
+    let px = (player_pos.x / map_size) * mm_size + mm_center.x - mm_size / 2.0;
+    let pz = (player_pos.z / map_size) * mm_size + mm_center.z - mm_size / 2.0;
+    g.sphere(Isometry3d::from_translation(Vec3::new(px, mm_y + 10.0, pz)), 50.0, Color::srgb(0.3, 1.0, 0.3));
 }
 
 fn sys_world_hp(mut g: Gizmos, e: Query<(&Transform, &Health, &TeamMember)>, p: Query<&TeamMember, With<PlayerControlled>>) {
