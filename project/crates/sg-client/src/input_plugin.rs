@@ -6,6 +6,7 @@ use sg_core::types::*;
 use sg_core::GameSet;
 use sg_gameplay::champions::{ChampionClass, ChampionId, get_champion, get_champion_by_id};
 use crate::ability_plugin::{AbilityCooldowns, ChampionKit, ChampionIdentity};
+use crate::movement_plugin::ChampionAnimState;
 use crate::shop_plugin::PlayerInventory;
 use crate::menu::AppState;
 use crate::menu::data::PlayerProfile;
@@ -106,6 +107,7 @@ fn spawn_champion_on_enter(
         },
         KillStreak::default(),
         GameStats::default(),
+        ChampionAnimState::default(),
     ));
 
     if let Some(path) = model_path {
@@ -193,6 +195,7 @@ fn spawn_champion_on_enter(
             },
             KillStreak::default(),
             GameStats::default(),
+            ChampionAnimState::default(),
         ));
 
         // Attach 3D model

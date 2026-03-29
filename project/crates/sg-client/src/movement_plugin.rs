@@ -1,4 +1,6 @@
 use bevy::prelude::*;
+use bevy::animation::AnimationPlayer;
+use bevy::animation::RepeatAnimation;
 use sg_core::components::*;
 use sg_core::GameSet;
 use crate::menu::AppState;
@@ -12,8 +14,60 @@ impl Plugin for MovementPlugin {
             (
                 follow_patrol_path.in_set(GameSet::AI),
                 move_to_target.in_set(GameSet::Movement),
+                update_anim_state,
+                play_champion_animations,
             ).run_if(in_state(AppState::InGame)),
         );
+    }
+}
+
+/// Tracks the current animation state of a champion
+#[derive(Component, PartialEq, Clone, Copy)]
+pub enum ChampionAnimState {
+    Idle,
+    Walking,
+    Attacking,
+    Dead,
+}
+
+impl Default for ChampionAnimState {
+    fn default() -> Self { Self::Idle }
+}
+
+/// Update animation state based on movement/combat/death
+fn update_anim_state(
+    mut query: Query<(
+        &mut ChampionAnimState,
+        Option<&MoveTarget>,
+        Option<&AttackTarget>,
+        Option<&Dead>,
+    ), With<Champion>>,
+) {
+    for (mut state, move_target, attack_target, dead) in &mut query {
+        let new_state = if dead.is_some() {
+            ChampionAnimState::Dead
+        } else if attack_target.is_some() {
+            ChampionAnimState::Attacking
+        } else if move_target.is_some() {
+            ChampionAnimState::Walking
+        } else {
+            ChampionAnimState::Idle
+        };
+        if *state != new_state {
+            *state = new_state;
+        }
+    }
+}
+
+/// Play animations on champions — the GLTF loader auto-creates AnimationPlayer
+/// and AnimationGraph. We just need to start playing the first clip.
+fn play_champion_animations(
+    mut players: Query<&mut AnimationPlayer, Added<AnimationPlayer>>,
+) {
+    // When a new AnimationPlayer appears (GLTF scene loaded), auto-play first animation
+    for mut player in &mut players {
+        let first_clip = bevy::animation::graph::AnimationNodeIndex::new(1);
+        player.play(first_clip).set_repeat(RepeatAnimation::Forever);
     }
 }
 
