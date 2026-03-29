@@ -22,6 +22,8 @@ impl Plugin for ObjectivesPlugin {
                 health_relic_pickup,
                 speed_shrine_pickup,
                 tick_buffs,
+                place_ward,
+                tick_wards,
             ).in_set(GameSet::Combat).run_if(in_state(AppState::InGame)));
     }
 }
@@ -339,6 +341,70 @@ fn tick_buffs(
         if buff.remaining <= 0.0 {
             stats.move_speed -= 80.0;
             commands.entity(entity).remove::<SpeedShrineBuff>();
+        }
+    }
+}
+
+// === Ward System ===
+
+#[derive(Component)]
+pub struct Ward {
+    pub lifetime: f32,
+}
+
+/// Place ward: press 4 to place a ward at cursor position
+fn place_ward(
+    mut commands: Commands,
+    keys: Res<ButtonInput<KeyCode>>,
+    windows: Query<&Window>,
+    camera_q: Query<(&Camera, &GlobalTransform)>,
+    player_q: Query<(&TeamMember, &Transform), With<PlayerControlled>>,
+    existing_wards: Query<Entity, With<Ward>>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+) {
+    if !keys.just_pressed(KeyCode::Digit4) { return; }
+
+    // Max 2 wards
+    if existing_wards.iter().count() >= 2 { return; }
+
+    let Ok((team, _player_tf)) = player_q.single() else { return; };
+    let Ok(window) = windows.single() else { return; };
+    let Some(cursor_pos) = window.cursor_position() else { return; };
+    let Ok((camera, cam_tf)) = camera_q.single() else { return; };
+    let Ok(ray) = camera.viewport_to_world(cam_tf, cursor_pos) else { return; };
+    let Some(dist) = ray.intersect_plane(Vec3::ZERO, InfinitePlane3d::new(Vec3::Y)) else { return; };
+    let target_pos = ray.get_point(dist);
+
+    let ward_color = if team.0 == Team::Blue { Color::srgb(0.2, 0.5, 1.0) } else { Color::srgb(0.8, 0.2, 0.2) };
+    let ward_mesh = meshes.add(Cylinder::new(8.0, 30.0));
+    let ward_mat = materials.add(StandardMaterial {
+        base_color: ward_color,
+        emissive: bevy::color::LinearRgba::rgb(0.3, 0.6, 1.0),
+        ..default()
+    });
+
+    commands.spawn((
+        Mesh3d(ward_mesh), MeshMaterial3d(ward_mat),
+        Transform::from_translation(target_pos + Vec3::Y * 15.0),
+        Ward { lifetime: 180.0 },
+        TeamMember(team.0),
+        Health { current: 3.0, max: 3.0, regen: 0.0 },
+        VisionRange(1100.0),
+    ));
+}
+
+/// Tick ward lifetime and despawn expired wards
+fn tick_wards(
+    mut commands: Commands,
+    time: Res<Time>,
+    mut wards: Query<(Entity, &mut Ward, &Health)>,
+) {
+    let dt = time.delta_secs();
+    for (entity, mut ward, health) in &mut wards {
+        ward.lifetime -= dt;
+        if ward.lifetime <= 0.0 || health.current <= 0.0 {
+            commands.entity(entity).despawn();
         }
     }
 }

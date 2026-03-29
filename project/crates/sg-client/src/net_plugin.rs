@@ -38,6 +38,8 @@ impl Plugin for NetPlugin {
             .add_systems(Update, (
                 try_connect,
                 receive_server_packets,
+                apply_server_snapshot,
+                send_player_position,
             ).in_set(GameSet::Input));
     }
 }
@@ -131,6 +133,42 @@ fn receive_server_packets(
                 println!("[Player {}]: {}", player_id, text);
             }
         }
+    }
+}
+
+use sg_core::components::*;
+use sg_core::types::*;
+
+/// Apply latest server snapshot to game entities
+fn apply_server_snapshot(
+    net: Res<NetClient>,
+    mut champions: Query<(&mut Transform, &mut Health, &mut Mana, &mut Gold, &mut Champion), Without<PlayerControlled>>,
+) {
+    if !net.connected { return; }
+    let Some(ref snapshot) = net.latest_snapshot else { return; };
+
+    // Update non-player champions from server state
+    // For now, skip — the server sends positions but we don't have entity→player_id mapping yet
+    // This is a framework for future full sync
+    let _ = (&mut champions, snapshot);
+}
+
+/// Send player position to server each frame
+fn send_player_position(
+    net: Res<NetClient>,
+    player: Query<(&Transform, &Health, &Mana), With<PlayerControlled>>,
+) {
+    if !net.connected { return; }
+    let Ok((tf, health, mana)) = player.single() else { return; };
+    if let Some(socket) = &net.socket {
+        let input = PlayerInput {
+            move_target: Some([tf.translation.x, tf.translation.z]),
+            ability_cast: None,
+            cursor_pos: [tf.translation.x, tf.translation.z],
+            attack_target_id: None,
+        };
+        let data = encode_packet(&ClientPacket::Input(input));
+        let _ = socket.send_to(&data, &net.server_addr);
     }
 }
 

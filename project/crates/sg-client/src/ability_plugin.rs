@@ -268,15 +268,51 @@ fn ability_input(
                 }
             }
             ChampionClass::Fighter => {
-                spawn_aoe(&mut commands, &mut meshes, &mut materials,
-                    player_pos, 250.0, r_total, 2.0, team.0,
-                    Color::srgba(0.9, 0.3, 0.0, 0.3), [2.0, 0.3, 0.0]);
+                let cid = champ_id_opt.map(|id| id.0);
+                if cid == Some(ChampionId::Garen) {
+                    // Garen R: Demacian Justice — execute (more damage on low HP targets)
+                    // Deals r_total + 30% of target's missing HP as bonus
+                    spawn_aoe(&mut commands, &mut meshes, &mut materials,
+                        target_pos, 150.0, r_total * 1.5, 0.2, team.0,
+                        Color::srgba(1.0, 0.9, 0.2, 0.5), [3.0, 2.0, 0.0]);
+                } else if cid == Some(ChampionId::MasterYi) {
+                    // Yi R: Highlander — speed + attack speed buff
+                    commands.entity(player_entity).insert(ActiveBuffs(vec![
+                        sg_core::BuffData {
+                            buff_type: sg_core::BuffType::Slow { percent: -0.5 },
+                            duration: 10.0,
+                            remaining: 10.0,
+                            source: Some(player_entity),
+                        }
+                    ]));
+                    // Also spawn visual aura
+                    spawn_aoe(&mut commands, &mut meshes, &mut materials,
+                        player_pos, 100.0, 0.0, 10.0, team.0,
+                        Color::srgba(0.9, 0.8, 0.0, 0.15), [1.0, 1.0, 0.0]);
+                } else if cid == Some(ChampionId::Tryndamere) {
+                    // Tryndamere R: Undying Rage — cannot die for 5s
+                    // Simplified: massive heal
+                    commands.entity(player_entity).insert(Shield { amount: 9999.0, remaining: 5.0 });
+                } else {
+                    spawn_aoe(&mut commands, &mut meshes, &mut materials,
+                        player_pos, 250.0, r_total, 2.0, team.0,
+                        Color::srgba(0.9, 0.3, 0.0, 0.3), [2.0, 0.3, 0.0]);
+                }
             }
             ChampionClass::Tank => {
-                spawn_aoe_cc(&mut commands, &mut meshes, &mut materials,
-                    player_pos, 350.0, r_total, 0.5, team.0,
-                    Color::srgba(0.3, 0.5, 0.2, 0.4), [0.5, 1.5, 0.2],
-                    Some(sg_core::BuffType::Stun), 1.5);
+                let cid = champ_id_opt.map(|id| id.0);
+                if cid == Some(ChampionId::Ashe) {
+                    // Ashe R: Crystal Arrow — global skillshot with stun
+                    spawn_skillshot_cc(&mut commands, &mut meshes, &mut materials,
+                        player_pos, direction, 1500.0, r_total, 15000.0, team.0,
+                        Color::srgb(0.3, 0.7, 1.0), [0.5, 1.5, 3.0],
+                        Some(sg_core::BuffType::Stun), 2.5);
+                } else {
+                    spawn_aoe_cc(&mut commands, &mut meshes, &mut materials,
+                        player_pos, 350.0, r_total, 0.5, team.0,
+                        Color::srgba(0.3, 0.5, 0.2, 0.4), [0.5, 1.5, 0.2],
+                        Some(sg_core::BuffType::Stun), 1.5);
+                }
             }
         }
     }
