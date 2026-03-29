@@ -142,15 +142,31 @@ use sg_core::types::*;
 /// Apply latest server snapshot to game entities
 fn apply_server_snapshot(
     net: Res<NetClient>,
-    mut champions: Query<(&mut Transform, &mut Health, &mut Mana, &mut Gold, &mut Champion), Without<PlayerControlled>>,
+    mut champions: Query<(&mut Transform, &mut Health, &mut Mana, &mut Gold, &mut Champion), Without<sg_core::components::PlayerControlled>>,
 ) {
     if !net.connected { return; }
     let Some(ref snapshot) = net.latest_snapshot else { return; };
 
-    // Update non-player champions from server state
-    // For now, skip — the server sends positions but we don't have entity→player_id mapping yet
-    // This is a framework for future full sync
-    let _ = (&mut champions, snapshot);
+    // Update non-player champions from server snapshot
+    // Match by champion name (simple approach — in production, use entity ID mapping)
+    for player_state in &snapshot.players {
+        for (mut tf, mut health, mut mana, mut gold, mut champion) in &mut champions {
+            // Simple matching: update all non-player champions from server positions
+            // This is approximate — a real implementation would use player_id→entity mapping
+            let ps_team = if player_state.team == 0 { Team::Blue } else { Team::Red };
+            if champion.team == ps_team {
+                tf.translation.x = player_state.position[0];
+                tf.translation.z = player_state.position[1];
+                health.current = player_state.health;
+                health.max = player_state.max_health;
+                mana.current = player_state.mana;
+                mana.max = player_state.max_mana;
+                gold.0 = player_state.gold;
+                champion.level = player_state.level;
+                break; // one match per player_state
+            }
+        }
+    }
 }
 
 /// Send player position to server each frame

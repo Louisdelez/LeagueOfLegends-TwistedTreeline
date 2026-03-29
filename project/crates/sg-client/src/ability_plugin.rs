@@ -133,26 +133,93 @@ fn ability_input(
         let q_total = q_dmg + if kit == ChampionClass::Fighter { stats.attack_damage * q_ratio } else { stats.ability_power * q_ratio };
         cds.q = q_cd;
         mana.current -= mana_costs[0];
+        let cid = champ_id_opt.map(|id| id.0);
         match kit {
             ChampionClass::Mage => {
-                spawn_skillshot(&mut commands, &mut meshes, &mut materials,
-                    player_pos, direction, 2000.0, q_total, 1200.0, team.0,
-                    Color::srgb(0.3, 0.5, 1.0), [0.5, 1.0, 3.0]);
+                if cid == Some(ChampionId::Lux) {
+                    // Lux Q: Light Binding — root skillshot (snare 2 targets)
+                    spawn_skillshot_cc(&mut commands, &mut meshes, &mut materials,
+                        player_pos, direction, 1800.0, q_total, 1175.0, team.0,
+                        Color::srgb(1.0, 0.9, 0.5), [2.0, 1.5, 0.5],
+                        Some(sg_core::BuffType::Root), 2.0);
+                } else if cid == Some(ChampionId::Jinx) {
+                    // Jinx Q: Switcheroo — toggle (simplified: long range skillshot)
+                    spawn_skillshot(&mut commands, &mut meshes, &mut materials,
+                        player_pos, direction, 2500.0, q_total, 1500.0, team.0,
+                        Color::srgb(1.0, 0.4, 0.6), [2.0, 0.3, 0.5]);
+                } else if cid == Some(ChampionId::Teemo) {
+                    // Teemo Q: Blinding Dart — targeted (simplified: short skillshot + blind placeholder)
+                    spawn_skillshot_cc(&mut commands, &mut meshes, &mut materials,
+                        player_pos, direction, 2200.0, q_total, 680.0, team.0,
+                        Color::srgb(0.5, 0.8, 0.2), [0.8, 1.5, 0.2],
+                        Some(sg_core::BuffType::Silence), 1.5); // Silence as blind placeholder
+                } else {
+                    // Default mage Q: fireball
+                    spawn_skillshot(&mut commands, &mut meshes, &mut materials,
+                        player_pos, direction, 2000.0, q_total, 1200.0, team.0,
+                        Color::srgb(0.3, 0.5, 1.0), [0.5, 1.0, 3.0]);
+                }
             }
             ChampionClass::Fighter => {
-                let dash_target = player_pos + direction * 300.0;
-                commands.entity(player_entity).remove::<AttackTarget>().insert(
-                    MoveTarget { position: Vec2::new(dash_target.x, dash_target.z) }
-                );
-                spawn_aoe(&mut commands, &mut meshes, &mut materials,
-                    dash_target, 120.0, q_total, 0.3, team.0,
-                    Color::srgba(0.9, 0.5, 0.1, 0.4), [2.0, 0.5, 0.0]);
+                if cid == Some(ChampionId::Yasuo) {
+                    // Yasuo Q: Steel Tempest — thin fast skillshot
+                    spawn_skillshot(&mut commands, &mut meshes, &mut materials,
+                        player_pos, direction, 3000.0, q_total, 475.0, team.0,
+                        Color::srgb(0.6, 0.8, 0.9), [1.0, 1.5, 2.0]);
+                } else if cid == Some(ChampionId::Jax) {
+                    // Jax Q: Leap Strike — long dash to target
+                    let dash_target = player_pos + direction * 600.0;
+                    commands.entity(player_entity).remove::<AttackTarget>().insert(
+                        MoveTarget { position: Vec2::new(dash_target.x, dash_target.z) }
+                    );
+                    spawn_aoe(&mut commands, &mut meshes, &mut materials,
+                        dash_target, 80.0, q_total, 0.2, team.0,
+                        Color::srgba(0.8, 0.6, 0.1, 0.4), [1.5, 1.0, 0.0]);
+                } else if cid == Some(ChampionId::Darius) {
+                    // Darius Q: Decimate — wide AOE around self
+                    spawn_aoe(&mut commands, &mut meshes, &mut materials,
+                        player_pos, 250.0, q_total, 0.3, team.0,
+                        Color::srgba(0.7, 0.1, 0.1, 0.4), [1.5, 0.2, 0.0]);
+                } else {
+                    // Default fighter Q: dash + AOE
+                    let dash_target = player_pos + direction * 300.0;
+                    commands.entity(player_entity).remove::<AttackTarget>().insert(
+                        MoveTarget { position: Vec2::new(dash_target.x, dash_target.z) }
+                    );
+                    spawn_aoe(&mut commands, &mut meshes, &mut materials,
+                        dash_target, 120.0, q_total, 0.3, team.0,
+                        Color::srgba(0.9, 0.5, 0.1, 0.4), [2.0, 0.5, 0.0]);
+                }
             }
             ChampionClass::Tank => {
-                spawn_aoe_cc(&mut commands, &mut meshes, &mut materials,
-                    player_pos, 200.0, q_total, 0.5, team.0,
-                    Color::srgba(0.4, 0.7, 0.3, 0.3), [0.5, 1.0, 0.2],
-                    Some(sg_core::BuffType::Stun), 1.5);
+                if cid == Some(ChampionId::Thresh) {
+                    // Thresh Q: Death Sentence — hook skillshot with stun
+                    spawn_skillshot_cc(&mut commands, &mut meshes, &mut materials,
+                        player_pos, direction, 1400.0, q_total, 1075.0, team.0,
+                        Color::srgb(0.3, 0.9, 0.3), [0.5, 2.0, 0.5],
+                        Some(sg_core::BuffType::Stun), 1.5);
+                } else if cid == Some(ChampionId::Singed) {
+                    // Singed Q: Poison Trail — DOT AOE behind self
+                    let behind = player_pos - direction * 100.0;
+                    spawn_aoe(&mut commands, &mut meshes, &mut materials,
+                        behind, 100.0, q_total * 0.3, 3.0, team.0,
+                        Color::srgba(0.2, 0.8, 0.1, 0.3), [0.3, 1.5, 0.1]);
+                } else if cid == Some(ChampionId::Mordekaiser) {
+                    // Mordekaiser Q: Mace of Spades — empowered AOE
+                    spawn_aoe(&mut commands, &mut meshes, &mut materials,
+                        player_pos, 180.0, q_total * 1.3, 0.3, team.0,
+                        Color::srgba(0.5, 0.5, 0.5, 0.4), [0.8, 0.8, 0.8]);
+                } else if cid == Some(ChampionId::Poppy) {
+                    // Poppy Q: Devastating Blow — short range high damage
+                    spawn_aoe(&mut commands, &mut meshes, &mut materials,
+                        player_pos + direction * 100.0, 80.0, q_total * 1.5, 0.2, team.0,
+                        Color::srgba(0.9, 0.7, 0.2, 0.5), [2.0, 1.5, 0.3]);
+                } else {
+                    spawn_aoe_cc(&mut commands, &mut meshes, &mut materials,
+                        player_pos, 200.0, q_total, 0.5, team.0,
+                        Color::srgba(0.4, 0.7, 0.3, 0.3), [0.5, 1.0, 0.2],
+                        Some(sg_core::BuffType::Stun), 1.5);
+                }
             }
         }
     }

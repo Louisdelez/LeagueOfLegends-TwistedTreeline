@@ -87,7 +87,7 @@ impl Default for ItemDatabase {
             ShopItem { id: 3044, name: "Phage", cost: 565, components: &[], icon: "ui/items/3044.png", ad: 20.0, ap: 0.0, hp: 200.0, armor: 0.0, mr: 0.0, attack_speed: 0.0 },
             ShopItem { id: 3022, name: "Frozen Mallet", cost: 1025, components: &[], icon: "ui/items/3022.png", ad: 30.0, ap: 0.0, hp: 700.0, armor: 0.0, mr: 0.0, attack_speed: 0.0 },
             // === Finished - AP ===
-            ShopItem { id: 3089, name: "Rabadon's Deathcap", cost: 840, components: &[], icon: "ui/items/3089.png", ad: 0.0, ap: 120.0, hp: 0.0, armor: 0.0, mr: 0.0, attack_speed: 0.0 },
+            ShopItem { id: 3089, name: "Rabadon's Deathcap", cost: 840, components: &[1058], icon: "ui/items/3089.png", ad: 0.0, ap: 120.0, hp: 0.0, armor: 0.0, mr: 0.0, attack_speed: 0.0 },
             ShopItem { id: 3100, name: "Lich Bane", cost: 850, components: &[], icon: "ui/items/3100.png", ad: 0.0, ap: 80.0, hp: 0.0, armor: 0.0, mr: 0.0, attack_speed: 0.0 },
             ShopItem { id: 3135, name: "Void Staff", cost: 1000, components: &[], icon: "ui/items/3135.png", ad: 0.0, ap: 70.0, hp: 0.0, armor: 0.0, mr: 0.0, attack_speed: 0.0 },
             ShopItem { id: 3157, name: "Zhonya's Hourglass", cost: 500, components: &[], icon: "ui/items/3157.png", ad: 0.0, ap: 120.0, hp: 0.0, armor: 50.0, mr: 0.0, attack_speed: 0.0 },
@@ -253,14 +253,39 @@ fn buy_item_keyboard(
     for (key, idx) in item_keys {
         if keys.just_pressed(key) && idx < db.items.len() {
             let item = &db.items[idx];
-            if gold.0 >= item.cost as f32 && inventory.items.len() < 6 {
+
+            // Calculate recipe cost: total cost - cost of owned components
+            let mut recipe_cost = item.cost as f32;
+            let mut components_to_remove: Vec<usize> = Vec::new();
+            for &comp_id in item.components {
+                // Find component in inventory
+                if let Some(inv_idx) = inventory.items.iter().position(|&id| id == comp_id) {
+                    if !components_to_remove.contains(&inv_idx) {
+                        // Find component cost in DB
+                        if let Some(comp_item) = db.items.iter().find(|i| i.id == comp_id) {
+                            recipe_cost -= comp_item.cost as f32;
+                            components_to_remove.push(inv_idx);
+                        }
+                    }
+                }
+            }
+            recipe_cost = recipe_cost.max(0.0);
+
+            if gold.0 >= recipe_cost && inventory.items.len() - components_to_remove.len() < 6 {
                 if net.connected {
                     crate::net_plugin::send_buy_item(&net, item.id);
                 }
-                gold.0 -= item.cost as f32;
+                gold.0 -= recipe_cost;
+                // Remove components from inventory (reverse order to preserve indices)
+                components_to_remove.sort_unstable_by(|a, b| b.cmp(a));
+                for idx in components_to_remove { inventory.items.remove(idx); }
                 inventory.items.push(item.id);
                 commands.entity(entity).insert(InventoryChanged);
-                println!("Bought {} for {}g", item.name, item.cost);
+                if recipe_cost < item.cost as f32 {
+                    println!("Upgraded to {} for {}g (recipe cost)", item.name, recipe_cost as u32);
+                } else {
+                    println!("Bought {} for {}g", item.name, item.cost);
+                }
             }
         }
     }
