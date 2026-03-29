@@ -45,11 +45,24 @@ fn spawn_champion_on_enter(
     let def = get_champion_by_id(champ_id);
     println!("Spawning champion: {} — {}", def.name, def.title);
 
-    // Map champion to available 3D model (Annie for mages, Garen for fighters/tanks)
-    let model_path = match def.class {
-        ChampionClass::Mage => Some("models/champions/annie_animated.glb#Scene0"),
-        ChampionClass::Fighter | ChampionClass::Tank => Some("models/champions/garen_animated.glb#Scene0"),
-    };
+    // Map each champion to their own 3D model
+    let model_path = Some(match champ_id {
+        ChampionId::Annie => "models/champions/annie_animated.glb#Scene0",
+        ChampionId::Garen => "models/champions/garen_animated.glb#Scene0",
+        ChampionId::Ashe => "models/champions/ashe_animated.glb#Scene0",
+        ChampionId::Darius => "models/champions/darius_animated.glb#Scene0",
+        ChampionId::Lux => "models/champions/lux_animated.glb#Scene0",
+        ChampionId::Thresh => "models/champions/thresh_animated.glb#Scene0",
+        ChampionId::Jinx => "models/champions/jinx_animated.glb#Scene0",
+        ChampionId::Yasuo => "models/champions/yasuo_animated.glb#Scene0",
+        ChampionId::MasterYi => "models/champions/masteryi_animated.glb#Scene0",
+        ChampionId::Jax => "models/champions/jax_animated.glb#Scene0",
+        ChampionId::Teemo => "models/champions/teemo_animated.glb#Scene0",
+        ChampionId::Singed => "models/champions/singed_animated.glb#Scene0",
+        ChampionId::Tryndamere => "models/champions/tryndamere_animated.glb#Scene0",
+        ChampionId::Mordekaiser => "models/champions/mordekaiser_animated.glb#Scene0",
+        ChampionId::Poppy => "models/champions/poppy_animated.glb#Scene0",
+    });
 
     let champion_mesh = meshes.add(Capsule3d::new(25.0, 60.0));
     let champion_mat = materials.add(StandardMaterial {
@@ -125,11 +138,24 @@ fn spawn_champion_on_enter(
             ..default()
         });
 
-        // Pick 3D model based on class
-        let bot_model = match bot_def.class {
-            ChampionClass::Mage => Some("models/champions/annie_animated.glb#Scene0"),
-            ChampionClass::Fighter | ChampionClass::Tank => Some("models/champions/garen_animated.glb#Scene0"),
-        };
+        // Each bot gets their own champion model
+        let bot_model = Some(match bot_champ_id {
+            ChampionId::Annie => "models/champions/annie_animated.glb#Scene0",
+            ChampionId::Garen => "models/champions/garen_animated.glb#Scene0",
+            ChampionId::Ashe => "models/champions/ashe_animated.glb#Scene0",
+            ChampionId::Darius => "models/champions/darius_animated.glb#Scene0",
+            ChampionId::Lux => "models/champions/lux_animated.glb#Scene0",
+            ChampionId::Thresh => "models/champions/thresh_animated.glb#Scene0",
+            ChampionId::Jinx => "models/champions/jinx_animated.glb#Scene0",
+            ChampionId::Yasuo => "models/champions/yasuo_animated.glb#Scene0",
+            ChampionId::MasterYi => "models/champions/masteryi_animated.glb#Scene0",
+            ChampionId::Jax => "models/champions/jax_animated.glb#Scene0",
+            ChampionId::Teemo => "models/champions/teemo_animated.glb#Scene0",
+            ChampionId::Singed => "models/champions/singed_animated.glb#Scene0",
+            ChampionId::Tryndamere => "models/champions/tryndamere_animated.glb#Scene0",
+            ChampionId::Mordekaiser => "models/champions/mordekaiser_animated.glb#Scene0",
+            ChampionId::Poppy => "models/champions/poppy_animated.glb#Scene0",
+        });
 
         let bot_entity = commands.spawn((
             Mesh3d(bot_mesh),
