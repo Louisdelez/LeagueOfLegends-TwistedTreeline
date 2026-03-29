@@ -74,6 +74,7 @@ impl Plugin for CombatPlugin {
                 check_inhibitor_destroyed,
                 tick_inhibitor_respawn,
                 tick_buffs,
+                surrender_vote,
                 check_nexus_destroyed,
                 recalculate_stats,
             )
@@ -925,6 +926,25 @@ fn recalculate_stats(
 }
 
 /// Check if a nexus is destroyed — game over
+/// Surrender vote: F6 = instant surrender in solo mode
+fn surrender_vote(
+    keys: Res<ButtonInput<KeyCode>>,
+    mut commands: Commands,
+    game_timer: Res<GameTimer>,
+    mut next_state: ResMut<NextState<AppState>>,
+    existing_result: Option<Res<GameResult>>,
+) {
+    if existing_result.is_some() { return; }
+    if keys.just_pressed(KeyCode::F6) {
+        println!("=== SURRENDER === Game over by surrender");
+        commands.insert_resource(GameResult {
+            victory: false,
+            game_duration: game_timer.elapsed,
+        });
+        next_state.set(AppState::PostGame);
+    }
+}
+
 fn check_nexus_destroyed(
     mut commands: Commands,
     structures: Query<(&Structure, &Health)>,

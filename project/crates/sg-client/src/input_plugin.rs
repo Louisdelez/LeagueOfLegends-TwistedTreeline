@@ -47,8 +47,8 @@ fn spawn_champion_on_enter(
 
     // Map champion to available 3D model (Annie for mages, Garen for fighters/tanks)
     let model_path = match def.class {
-        ChampionClass::Mage => Some("models/champions/annie.glb#Scene0"),
-        ChampionClass::Fighter | ChampionClass::Tank => Some("models/champions/garen.glb#Scene0"),
+        ChampionClass::Mage => Some("models/champions/annie_animated.glb#Scene0"),
+        ChampionClass::Fighter | ChampionClass::Tank => Some("models/champions/garen_animated.glb#Scene0"),
     };
 
     let champion_mesh = meshes.add(Capsule3d::new(25.0, 60.0));
@@ -127,8 +127,8 @@ fn spawn_champion_on_enter(
 
         // Pick 3D model based on class
         let bot_model = match bot_def.class {
-            ChampionClass::Mage => Some("models/champions/annie.glb#Scene0"),
-            ChampionClass::Fighter | ChampionClass::Tank => Some("models/champions/garen.glb#Scene0"),
+            ChampionClass::Mage => Some("models/champions/annie_animated.glb#Scene0"),
+            ChampionClass::Fighter | ChampionClass::Tank => Some("models/champions/garen_animated.glb#Scene0"),
         };
 
         let bot_entity = commands.spawn((
