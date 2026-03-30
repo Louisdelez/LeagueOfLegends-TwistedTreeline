@@ -8,6 +8,10 @@ edition.workspace = true
 name = "sg-client"
 path = "src/main.rs"
 
+[[bin]]
+name = "sg-test"
+path = "src/test_main.rs"
+
 [dependencies]
 bevy = { workspace = true }
 bevy_hui = { workspace = true }
@@ -20,3 +24,5 @@ sg-protocol = { path = "../sg-protocol" }
 sg-map = { path = "../sg-map" }
 sg-gameplay = { path = "../sg-gameplay" }
 sg-ai = { path = "../sg-ai" }
+sg-navigation = { path = "../sg-navigation" }
+image = "0.25"

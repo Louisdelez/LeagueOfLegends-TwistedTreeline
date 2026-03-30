@@ -10,6 +10,8 @@ mod ability_plugin;
 mod objectives_plugin;
 pub mod net_plugin;
 mod fog_plugin;
+mod minion_plugin;
+mod navigation_plugin;
 mod shop_plugin;
 mod audio_plugin;
 mod menu;
@@ -20,6 +22,7 @@ use menu::AppState;
 
 fn main() {
     App::new()
+        .set_error_handler(bevy::ecs::error::warn)
         .insert_resource(ClearColor(Color::srgb(0.01, 0.01, 0.02)))
         .add_plugins(DefaultPlugins.set(WindowPlugin {
             primary_window: Some(Window {
@@ -52,6 +55,8 @@ fn main() {
         .add_plugins(combat_plugin::CombatPlugin)
         .add_plugins(ability_plugin::AbilityPlugin)
         .add_plugins(objectives_plugin::ObjectivesPlugin)
+        .add_plugins(navigation_plugin::NavigationPlugin)
+        .add_plugins(minion_plugin::MinionPlugin)
         .add_plugins(fog_plugin::FogPlugin)
         .add_plugins(shop_plugin::ShopPlugin)
         // UI & Network

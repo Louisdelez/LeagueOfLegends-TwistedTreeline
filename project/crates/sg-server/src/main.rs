@@ -272,6 +272,13 @@ fn receive_packets(mut server: ResMut<NetServer>, mut state: ResMut<ServerGameSt
                     let _ = server.socket.send_to(&encode_packet(&ServerPacket::Welcome { player_id: id, team, spawn }), addr);
                     s.event_queue.push(GameEvent::PlayerJoined { id, name, team });
                     println!("Player {} joined (team {}, class {})", id, team, champion_class);
+                    // Send lobby update to all clients
+                    let lobby_players: Vec<LobbyPlayerInfo> = s.players.iter().map(|(&pid, p)| {
+                        LobbyPlayerInfo { id: pid, name: format!("Player {}", pid), team: p.team, champion_class: p.champion_class, ready: true }
+                    }).collect();
+                    let lobby_pkt = encode_packet(&ServerPacket::LobbyUpdate { players: lobby_players, countdown: if server.clients.len() >= 2 { Some(10.0) } else { None } });
+                    for &a in server.clients.keys() { let _ = server.socket.send_to(&lobby_pkt, a); }
+
                     if server.clients.len() >= 2 && !s.started { s.started = true; s.event_queue.push(GameEvent::GameStart); println!("Game started!"); }
                 }
                 ClientPacket::Input(input) => {
@@ -296,6 +303,9 @@ fn receive_packets(mut server: ResMut<NetServer>, mut state: ResMut<ServerGameSt
                     }
                 }
                 ClientPacket::Surrender { .. } => {}
+                ClientPacket::Ready => {
+                    // Ready acknowledged (currently auto-ready on join)
+                }
                 ClientPacket::BuyItem { item_id } => {
                     if let Some(&id) = server.clients.get(&addr) {
                         buy_item(&mut s.players, &mut s.event_queue, &s.layout, id, item_id);

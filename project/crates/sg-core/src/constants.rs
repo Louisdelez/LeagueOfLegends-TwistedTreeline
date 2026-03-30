@@ -55,8 +55,9 @@ pub const ASSIST_POOL_MAX: f32 = 0.50;
 
 // === Minion Gold ===
 pub const MELEE_MINION_GOLD: f32 = 20.0;
-pub const CASTER_MINION_GOLD: f32 = 17.0;
-pub const SIEGE_MINION_GOLD: f32 = 45.0;
+pub const CASTER_MINION_GOLD: f32 = 10.0;
+pub const SIEGE_MINION_GOLD: f32 = 35.0;
+pub const SUPER_MINION_GOLD: f32 = 150.0;
 pub const MINION_GOLD_GROWTH_PER_90S: f32 = 0.125;
 pub const SIEGE_GOLD_GROWTH_PER_90S: f32 = 0.35;
 

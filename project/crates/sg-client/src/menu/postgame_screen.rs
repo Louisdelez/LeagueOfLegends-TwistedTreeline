@@ -73,7 +73,17 @@ pub fn setup(mut commands: Commands, fonts: Res<UiFonts>, ui_assets: Res<UiAsset
         let gold_str = p_stats.map(|s| format!("{:.0}", s.gold_earned)).unwrap_or_else(|| "0".to_string());
         let dur_str = game_result.as_ref().map(|r| { let m = (r.game_duration / 60.0) as u32; let sc = (r.game_duration % 60.0) as u32; format!("{}:{:02}", m, sc) }).unwrap_or_else(|| "0:00".to_string());
         let dmg_str = p_stats.map(|s| format!("{:.0}", s.damage_dealt)).unwrap_or_else(|| "0".to_string());
-        let stat_values: Vec<(String, String)> = vec![("KDA".into(), kda_str), ("CS".into(), cs_str), ("Gold".into(), gold_str), ("Duration".into(), dur_str), ("Damage".into(), dmg_str)];
+        let dmg_champ_str = p_stats.map(|s| format!("{:.0}", s.damage_to_champions)).unwrap_or_else(|| "0".to_string());
+        let wards_str = p_stats.map(|s| format!("{}", s.wards_placed)).unwrap_or_else(|| "0".to_string());
+        let multi_str = p_stats.map(|s| {
+            match s.largest_multi_kill { 0 | 1 => "-".to_string(), 2 => "Double Kill".to_string(), 3 => "Triple Kill".to_string(), _ => "Quadra+".to_string() }
+        }).unwrap_or_else(|| "-".to_string());
+        let stat_values: Vec<(String, String)> = vec![
+            ("KDA".into(), kda_str), ("CS".into(), cs_str), ("Gold".into(), gold_str),
+            ("Duration".into(), dur_str), ("Damage".into(), dmg_str),
+            ("To Champs".into(), dmg_champ_str), ("Wards".into(), wards_str),
+            ("Multi Kill".into(), multi_str),
+        ];
 
         root.spawn((
             Node { width: Val::Px(600.0), flex_direction: FlexDirection::Row, justify_content: JustifyContent::SpaceEvenly, padding: UiRect::all(Val::Px(15.0)), border: UiRect::all(Val::Px(1.0)), ..default() },

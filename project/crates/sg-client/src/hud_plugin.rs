@@ -43,11 +43,11 @@ fn setup_hud(mut cmd: Commands, server: Res<AssetServer>) {
 
 fn update_hud_properties(
     mut cmd: Commands,
-    player_q: Query<(&Health, &Mana, &Gold, &Champion, Option<&crate::ability_plugin::ChampionKit>, Option<&GameStats>), With<PlayerControlled>>,
+    player_q: Query<(&Health, &Mana, &Gold, &Champion, Option<&crate::ability_plugin::ChampionKit>, Option<&GameStats>, Option<&AbilityCooldowns>), With<PlayerControlled>>,
     mut hud_q: Query<(Entity, &mut TemplateProperties), With<HudRoot>>,
     game_timer: Res<GameTimer>,
 ) {
-    let Ok((health, mana, gold, champion, kit_opt, stats_opt)) = player_q.single() else { return };
+    let Ok((health, mana, gold, champion, kit_opt, stats_opt, cd_opt)) = player_q.single() else { return };
     let Ok((entity, mut props)) = hud_q.single_mut() else { return };
 
     let hp_pct = ((health.current / health.max).clamp(0.0, 1.0) * 100.0) as u32;
@@ -57,8 +57,10 @@ fn update_hud_properties(
     let new_gold = format!("{:.0}", gold.0);
     let new_level = format!("{}", champion.level);
 
+    let has_cd = cd_opt.map_or(false, |c| c.q > 0.0 || c.w > 0.0 || c.e > 0.0 || c.r > 0.0);
     if props.get("hp_pct").map(|s| s.as_str()) != Some(&new_hp_pct)
         || props.get("gold").map(|s| s.as_str()) != Some(&new_gold)
+        || has_cd
     {
         props.insert("hp_pct".to_string(), new_hp_pct);
         props.insert("hp_text".to_string(), format!("{:.0}/{:.0}", health.current, health.max));
@@ -98,6 +100,15 @@ fn update_hud_properties(
         let mins = (game_timer.elapsed / 60.0) as u32;
         let secs = (game_timer.elapsed % 60.0) as u32;
         props.insert("game_time".to_string(), format!("{}:{:02}", mins, secs));
+
+        // Ability cooldowns
+        if let Some(cds) = cd_opt {
+            let fmt = |v: f32| if v > 0.0 { format!("{:.0}", v.ceil()) } else { String::new() };
+            props.insert("q_cd".to_string(), fmt(cds.q));
+            props.insert("w_cd".to_string(), fmt(cds.w));
+            props.insert("e_cd".to_string(), fmt(cds.e));
+            props.insert("r_cd".to_string(), fmt(cds.r));
+        }
 
         cmd.trigger(CompileContextEvent { entity });
     }

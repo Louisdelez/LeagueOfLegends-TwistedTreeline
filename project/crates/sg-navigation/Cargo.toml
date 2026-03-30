@@ -1,0 +1,8 @@
+[package]
+name = "sg-navigation"
+description = "LoL NGRID navigation grid parser and A* pathfinding"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+bevy = { workspace = true }

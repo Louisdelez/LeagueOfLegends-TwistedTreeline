@@ -358,7 +358,7 @@ fn place_ward(
     keys: Res<ButtonInput<KeyCode>>,
     windows: Query<&Window>,
     camera_q: Query<(&Camera, &GlobalTransform)>,
-    player_q: Query<(&TeamMember, &Transform), With<PlayerControlled>>,
+    mut player_q: Query<(&TeamMember, &Transform, &mut GameStats), With<PlayerControlled>>,
     existing_wards: Query<Entity, With<Ward>>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
@@ -368,7 +368,7 @@ fn place_ward(
     // Max 2 wards
     if existing_wards.iter().count() >= 2 { return; }
 
-    let Ok((team, _player_tf)) = player_q.single() else { return; };
+    let Ok((team, _player_tf, mut player_stats)) = player_q.single_mut() else { return; };
     let Ok(window) = windows.single() else { return; };
     let Some(cursor_pos) = window.cursor_position() else { return; };
     let Ok((camera, cam_tf)) = camera_q.single() else { return; };
@@ -392,6 +392,7 @@ fn place_ward(
         Health { current: 3.0, max: 3.0, regen: 0.0 },
         VisionRange(1100.0),
     ));
+    player_stats.wards_placed += 1;
 }
 
 /// Tick ward lifetime and despawn expired wards

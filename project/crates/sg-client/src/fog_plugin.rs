@@ -5,9 +5,79 @@ use crate::menu::AppState;
 
 pub struct FogPlugin;
 
+#[derive(Component)]
+pub struct FogTile { pub gx: usize, pub gz: usize }
+
 impl Plugin for FogPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, (update_visibility, draw_fog_overlay).run_if(in_state(AppState::InGame)));
+        app.add_systems(OnEnter(AppState::InGame), spawn_fog_tiles)
+            .add_systems(Update, (update_visibility, update_fog_tiles, draw_fog_overlay).run_if(in_state(AppState::InGame)));
+    }
+}
+
+const FOG_RES: usize = 32; // 32x32 fog grid (each tile covers ~480 units)
+const FOG_TILE_SIZE: f32 = 15398.0 / FOG_RES as f32;
+
+/// Spawn fog overlay tiles covering the map
+fn spawn_fog_tiles(
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+) {
+    let mesh = meshes.add(Plane3d::new(Vec3::Y, Vec2::splat(FOG_TILE_SIZE / 2.0)));
+    let mat = materials.add(StandardMaterial {
+        base_color: Color::srgba(0.0, 0.0, 0.05, 0.6),
+        alpha_mode: AlphaMode::Blend,
+        unlit: true,
+        ..default()
+    });
+    for gz in 0..FOG_RES {
+        for gx in 0..FOG_RES {
+            commands.spawn((
+                Mesh3d(mesh.clone()),
+                MeshMaterial3d(mat.clone()),
+                Transform::from_xyz(
+                    gx as f32 * FOG_TILE_SIZE + FOG_TILE_SIZE / 2.0,
+                    200.0,
+                    gz as f32 * FOG_TILE_SIZE + FOG_TILE_SIZE / 2.0,
+                ),
+                FogTile { gx, gz },
+            ));
+        }
+    }
+}
+
+/// Update fog tile visibility based on allied vision
+fn update_fog_tiles(
+    player_q: Query<&TeamMember, With<PlayerControlled>>,
+    allies: Query<(&Transform, &TeamMember, Option<&VisionRange>), Without<Dead>>,
+    mut fog_tiles: Query<(&FogTile, &mut Visibility)>,
+) {
+    let my_team = match player_q.iter().next() {
+        Some(t) => t.0,
+        None => return,
+    };
+
+    let vision_sources: Vec<(Vec2, f32)> = allies
+        .iter()
+        .filter(|(_, team, _)| team.0 == my_team)
+        .map(|(tf, _, vr)| {
+            let range = vr.map(|v| v.0).unwrap_or(1200.0);
+            (Vec2::new(tf.translation.x, tf.translation.z), range)
+        })
+        .collect();
+
+    for (tile, mut vis) in &mut fog_tiles {
+        let tile_center = Vec2::new(
+            tile.gx as f32 * FOG_TILE_SIZE + FOG_TILE_SIZE / 2.0,
+            tile.gz as f32 * FOG_TILE_SIZE + FOG_TILE_SIZE / 2.0,
+        );
+
+        let in_vision = vision_sources.iter().any(|(pos, range)| {
+            pos.distance(tile_center) < *range
+        });
+
+        *vis = if in_vision { Visibility::Hidden } else { Visibility::Inherited };
     }
 }
 

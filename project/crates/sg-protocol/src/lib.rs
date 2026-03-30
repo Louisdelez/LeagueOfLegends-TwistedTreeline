@@ -18,6 +18,8 @@ pub enum ClientPacket {
     Chat { text: String },
     /// Surrender vote
     Surrender { vote: bool },
+    /// Ready up in lobby
+    Ready,
     /// Buy item from shop
     BuyItem { item_id: u32 },
     /// Sell item from inventory slot
@@ -48,6 +50,8 @@ pub enum ServerPacket {
     Event(GameEvent),
     /// Chat from another player
     Chat { player_id: u8, text: String },
+    /// Lobby update with connected players
+    LobbyUpdate { players: Vec<LobbyPlayerInfo>, countdown: Option<f32> },
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -85,6 +89,15 @@ pub struct PlayerState {
     pub cooldowns: [f32; 4], // Q, W, E, R remaining cd
     pub items: Vec<u32>,     // item IDs in inventory
     pub buffs: Vec<BuffSnap>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct LobbyPlayerInfo {
+    pub id: u8,
+    pub name: String,
+    pub team: u8,
+    pub champion_class: u8,
+    pub ready: bool,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]

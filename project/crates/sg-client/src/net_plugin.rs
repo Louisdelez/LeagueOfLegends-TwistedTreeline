@@ -1,4 +1,5 @@
 use bevy::prelude::*;
+use std::collections::HashMap;
 use std::net::UdpSocket;
 use sg_protocol::*;
 use sg_core::GameSet;
@@ -30,11 +31,17 @@ impl Default for NetClient {
     }
 }
 
+#[derive(Resource, Default)]
+pub struct PlayerEntityMap {
+    pub map: HashMap<u8, Entity>,
+}
+
 pub struct NetPlugin;
 
 impl Plugin for NetPlugin {
     fn build(&self, app: &mut App) {
         app.insert_resource(NetClient::default())
+            .insert_resource(PlayerEntityMap::default())
             .add_systems(Update, (
                 try_connect,
                 receive_server_packets,
@@ -132,6 +139,10 @@ fn receive_server_packets(
             ServerPacket::Chat { player_id, text } => {
                 println!("[Player {}]: {}", player_id, text);
             }
+            ServerPacket::LobbyUpdate { players, countdown } => {
+                println!("Lobby: {} players{}", players.len(),
+                    countdown.map(|c| format!(", starting in {:.0}s", c)).unwrap_or_default());
+            }
         }
     }
 }
@@ -139,22 +150,28 @@ fn receive_server_packets(
 use sg_core::components::*;
 use sg_core::types::*;
 
-/// Apply latest server snapshot to game entities
+/// Apply latest server snapshot to game entities using player ID matching
 fn apply_server_snapshot(
     net: Res<NetClient>,
-    mut champions: Query<(&mut Transform, &mut Health, &mut Mana, &mut Gold, &mut Champion), Without<sg_core::components::PlayerControlled>>,
+    mut entity_map: ResMut<PlayerEntityMap>,
+    player_q: Query<Entity, With<PlayerControlled>>,
+    mut champions: Query<(&mut Transform, &mut Health, &mut Mana, &mut Gold, &mut Champion), Without<PlayerControlled>>,
 ) {
     if !net.connected { return; }
     let Some(ref snapshot) = net.latest_snapshot else { return; };
 
-    // Update non-player champions from server snapshot
-    // Match by champion name (simple approach — in production, use entity ID mapping)
+    // Ensure local player is mapped
+    if let (Some(my_id), Ok(player_entity)) = (net.my_id, player_q.single()) {
+        entity_map.map.entry(my_id).or_insert(player_entity);
+    }
+
     for player_state in &snapshot.players {
-        for (mut tf, mut health, mut mana, mut gold, mut champion) in &mut champions {
-            // Simple matching: update all non-player champions from server positions
-            // This is approximate — a real implementation would use player_id→entity mapping
-            let ps_team = if player_state.team == 0 { Team::Blue } else { Team::Red };
-            if champion.team == ps_team {
+        // Skip self — local player is authoritative
+        if Some(player_state.id) == net.my_id { continue; }
+
+        // Match by player_id if we have a mapping
+        if let Some(&entity) = entity_map.map.get(&player_state.id) {
+            if let Ok((mut tf, mut health, mut mana, mut gold, mut champion)) = champions.get_mut(entity) {
                 tf.translation.x = player_state.position[0];
                 tf.translation.z = player_state.position[1];
                 health.current = player_state.health;
@@ -163,9 +180,10 @@ fn apply_server_snapshot(
                 mana.max = player_state.max_mana;
                 gold.0 = player_state.gold;
                 champion.level = player_state.level;
-                break; // one match per player_state
             }
         }
+        // If no mapping exists yet for this player_id, we could spawn a remote entity here
+        // For now, remote players are only synced if pre-mapped (e.g., bots spawned locally)
     }
 }
 
@@ -211,6 +229,15 @@ pub fn send_sell_item(net: &NetClient, slot: u8) {
     if !net.connected { return; }
     if let Some(socket) = &net.socket {
         let data = encode_packet(&ClientPacket::SellItem { slot });
+        let _ = socket.send_to(&data, &net.server_addr);
+    }
+}
+
+/// Send chat message to server
+pub fn send_chat(net: &NetClient, text: &str) {
+    if !net.connected { return; }
+    if let Some(socket) = &net.socket {
+        let data = encode_packet(&ClientPacket::Chat { text: text.to_string() });
         let _ = socket.send_to(&data, &net.server_addr);
     }
 }

@@ -42,7 +42,8 @@ impl Plugin for SpawnPlugin {
             wave_count: 0,
         })
         .insert_resource(JungleCampState::default())
-        .add_systems(Update, (update_game_timer, spawn_minion_waves, init_jungle_camps, spawn_jungle_camps).chain().in_set(GameSet::Spawn).run_if(in_state(crate::menu::AppState::InGame)));
+        // Minion spawning moved to MinionPlugin
+        .add_systems(Update, (update_game_timer, init_jungle_camps, spawn_jungle_camps).chain().in_set(GameSet::Spawn).run_if(in_state(crate::menu::AppState::InGame)));
     }
 }
 
@@ -67,10 +68,10 @@ fn spawn_minion_waves(
     let is_cannon = timer.wave_count % 3 == 2;
     timer.wave_count += 1;
 
-    // Different meshes per minion type for visual distinction
-    let melee_mesh = meshes.add(Cuboid::new(20.0, 30.0, 20.0));
-    let caster_mesh = meshes.add(Capsule3d::new(10.0, 20.0));
-    let siege_mesh = meshes.add(Cuboid::new(30.0, 25.0, 40.0));
+    // Minion meshes — visible at game scale
+    let melee_mesh = meshes.add(Cuboid::new(35.0, 45.0, 35.0));
+    let caster_mesh = meshes.add(Capsule3d::new(18.0, 35.0));
+    let siege_mesh = meshes.add(Cuboid::new(50.0, 40.0, 60.0));
 
     let blue_melee_mat = materials.add(StandardMaterial {
         base_color: Color::srgb(0.15, 0.3, 0.8),
@@ -141,17 +142,27 @@ fn spawn_minion_waves(
         }
 
         for (i, &mtype) in lane_composition.iter().enumerate() {
+            // Real LoL TT patch 4.20 minion stats
             let hp = match mtype {
-                MinionType::Melee => 475.0,
-                MinionType::Super => 800.0,
+                MinionType::Melee => 455.0,
                 MinionType::Caster => 290.0,
-                MinionType::Siege => 700.0,
+                MinionType::Siege => 805.0,
+                MinionType::Super => 1500.0,
             };
             let ad = match mtype {
                 MinionType::Melee => 12.0,
-                MinionType::Super => 40.0,
                 MinionType::Caster => 23.0,
                 MinionType::Siege => 40.0,
+                MinionType::Super => 180.0,
+            };
+            let atk_speed = match mtype {
+                MinionType::Melee | MinionType::Caster => 1.6,
+                MinionType::Siege => 2.0,
+                MinionType::Super => 1.0,
+            };
+            let armor = match mtype {
+                MinionType::Super => 30.0,
+                _ => 0.0,
             };
 
             let (mesh, mat) = match (mtype, team) {
@@ -166,10 +177,11 @@ fn spawn_minion_waves(
             commands.spawn((
                 Mesh3d(mesh),
                 MeshMaterial3d(mat),
+                // Each minion spawns at the lane start, spaced 60 units apart along the lane
                 Transform::from_xyz(
-                    spawn_pos.x + (i as f32 * 40.0),
+                    spawn_pos.x,
                     15.0,
-                    spawn_pos.y,
+                    spawn_pos.y + (i as f32 * 30.0), // small Z offset to prevent stacking
                 ),
                 Minion {
                     minion_type: mtype,
@@ -181,9 +193,9 @@ fn spawn_minion_waves(
                 CombatStats {
                     attack_damage: ad,
                     ability_power: 0.0,
-                    armor: 0.0,
+                    armor,
                     magic_resist: 0.0,
-                    attack_speed: 0.625,
+                    attack_speed: atk_speed,
                     move_speed: 325.0,
                     crit_chance: 0.0,
                     cdr: 0.0,
@@ -195,9 +207,12 @@ fn spawn_minion_waves(
                     spell_vamp: 0.0,
                 },
                 AutoAttackRange(match mtype {
-                    MinionType::Melee | MinionType::Super => 110.0,
-                    MinionType::Caster | MinionType::Siege => 550.0,
+                    MinionType::Melee => 110.0,
+                    MinionType::Super => 170.0,
+                    MinionType::Caster => 550.0,
+                    MinionType::Siege => 300.0,
                 }),
+                AttackCooldown(0.0),
                 PatrolPath {
                     waypoints: waypoints.clone(),
                     current_index: 0,

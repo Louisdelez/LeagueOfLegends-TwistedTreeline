@@ -4,6 +4,7 @@ use sg_core::components::*;
 use sg_core::types::*;
 use sg_core::GameSet;
 use sg_gameplay::champions::{ChampionClass, ChampionId, get_champion_by_id};
+use crate::audio_plugin::{SfxHandles, play_sfx};
 use crate::menu::AppState;
 
 pub struct AbilityPlugin;
@@ -16,6 +17,7 @@ impl Plugin for AbilityPlugin {
             process_aoe_effects,
             tick_shields,
             tick_tibbers,
+            draw_ability_vfx,
         ).chain().in_set(GameSet::Combat).run_if(in_state(AppState::InGame)));
     }
 }
@@ -81,6 +83,7 @@ fn ability_input(
     mut commands: Commands,
     keys: Res<ButtonInput<KeyCode>>,
     time: Res<Time>,
+    sfx: Res<SfxHandles>,
     asset_server: Res<AssetServer>,
     windows: Query<&Window>,
     camera_q: Query<(&Camera, &GlobalTransform)>,
@@ -133,6 +136,7 @@ fn ability_input(
         let q_total = q_dmg + if kit == ChampionClass::Fighter { stats.attack_damage * q_ratio } else { stats.ability_power * q_ratio };
         cds.q = q_cd;
         mana.current -= mana_costs[0];
+        play_sfx(&mut commands, &sfx.cast);
         let cid = champ_id_opt.map(|id| id.0);
         match kit {
             ChampionClass::Mage => {
@@ -233,20 +237,85 @@ fn ability_input(
         };
         cds.w = w_cd;
         mana.current -= mana_costs[1];
+        play_sfx(&mut commands, &sfx.cast);
+        let cid = champ_id_opt.map(|id| id.0);
         match kit {
             ChampionClass::Mage => {
                 let w_total = w_dmg + stats.ability_power * w_ratio;
-                spawn_aoe(&mut commands, &mut meshes, &mut materials,
-                    target_pos, 150.0, w_total, 0.5, team.0,
-                    Color::srgba(0.9, 0.3, 0.1, 0.4), [2.0, 0.5, 0.0]);
+                if cid == Some(ChampionId::Lux) {
+                    // Lux W: Prismatic Barrier — shield boomerang (self-shield + ally shield)
+                    commands.entity(player_entity).insert(Shield { amount: w_total * 0.8, remaining: 3.0 });
+                } else if cid == Some(ChampionId::Jinx) {
+                    // Jinx W: Zap! — long range skillshot with slow
+                    spawn_skillshot_cc(&mut commands, &mut meshes, &mut materials,
+                        player_pos, direction, 3300.0, w_total, 1500.0, team.0,
+                        Color::srgb(1.0, 0.2, 0.8), [2.0, 0.5, 1.0],
+                        Some(sg_core::BuffType::Slow { percent: 0.5 }), 2.0);
+                } else if cid == Some(ChampionId::Teemo) {
+                    // Teemo W: Move Quick — speed buff
+                    commands.entity(player_entity).insert(ActiveBuffs(vec![
+                        sg_core::BuffData {
+                            buff_type: sg_core::BuffType::Slow { percent: -0.4 },
+                            duration: 3.0, remaining: 3.0, source: Some(player_entity),
+                        }
+                    ]));
+                } else {
+                    // Default mage W: AOE zone
+                    spawn_aoe(&mut commands, &mut meshes, &mut materials,
+                        target_pos, 150.0, w_total, 0.5, team.0,
+                        Color::srgba(0.9, 0.3, 0.1, 0.4), [2.0, 0.5, 0.0]);
+                }
             }
             ChampionClass::Fighter => {
                 let shield_amount = w_dmg + stats.attack_damage * w_ratio;
-                commands.entity(player_entity).insert(Shield { amount: shield_amount, remaining: 4.0 });
+                if cid == Some(ChampionId::Yasuo) {
+                    // Yasuo W: Wind Wall — projectile-blocking zone (simplified: shield)
+                    commands.entity(player_entity).insert(Shield { amount: shield_amount * 1.5, remaining: 4.0 });
+                } else if cid == Some(ChampionId::Jax) {
+                    // Jax W: Empower — next AA empowered (simplified: self-buff + AOE)
+                    spawn_aoe(&mut commands, &mut meshes, &mut materials,
+                        player_pos + direction * 80.0, 100.0, shield_amount, 0.3, team.0,
+                        Color::srgba(0.9, 0.7, 0.1, 0.4), [2.0, 1.5, 0.0]);
+                } else if cid == Some(ChampionId::Darius) {
+                    // Darius W: Crippling Strike — empowered AA + slow
+                    spawn_aoe_cc(&mut commands, &mut meshes, &mut materials,
+                        player_pos + direction * 100.0, 120.0, shield_amount, 0.3, team.0,
+                        Color::srgba(0.7, 0.2, 0.2, 0.4), [1.5, 0.3, 0.0],
+                        Some(sg_core::BuffType::Slow { percent: 0.4 }), 1.0);
+                } else {
+                    commands.entity(player_entity).insert(Shield { amount: shield_amount, remaining: 4.0 });
+                }
             }
             ChampionClass::Tank => {
                 let shield_amount = w_dmg + stats.armor * 0.3 + stats.magic_resist * 0.3;
-                commands.entity(player_entity).insert(Shield { amount: shield_amount, remaining: 5.0 });
+                if cid == Some(ChampionId::Thresh) {
+                    // Thresh W: Dark Passage — lantern shield (self-shield)
+                    commands.entity(player_entity).insert(Shield { amount: shield_amount * 1.2, remaining: 6.0 });
+                } else if cid == Some(ChampionId::Singed) {
+                    // Singed W: Mega Adhesive — slow zone at target
+                    spawn_aoe_cc(&mut commands, &mut meshes, &mut materials,
+                        target_pos, 200.0, 0.0, 5.0, team.0,
+                        Color::srgba(0.3, 0.6, 0.1, 0.3), [0.5, 1.0, 0.1],
+                        Some(sg_core::BuffType::Slow { percent: 0.6 }), 3.0);
+                } else if cid == Some(ChampionId::Mordekaiser) {
+                    // Mordekaiser W: Harvester of Sorrow — AOE + shield
+                    let w_total = w_dmg + stats.ability_power * w_ratio;
+                    spawn_aoe(&mut commands, &mut meshes, &mut materials,
+                        player_pos, 200.0, w_total, 0.5, team.0,
+                        Color::srgba(0.4, 0.4, 0.4, 0.4), [0.6, 0.6, 0.6]);
+                    commands.entity(player_entity).insert(Shield { amount: shield_amount, remaining: 4.0 });
+                } else if cid == Some(ChampionId::Poppy) {
+                    // Poppy W: Paragon of Demacia — speed + armor buff
+                    commands.entity(player_entity).insert(ActiveBuffs(vec![
+                        sg_core::BuffData {
+                            buff_type: sg_core::BuffType::Slow { percent: -0.3 },
+                            duration: 5.0, remaining: 5.0, source: Some(player_entity),
+                        }
+                    ]));
+                    commands.entity(player_entity).insert(Shield { amount: shield_amount * 0.5, remaining: 5.0 });
+                } else {
+                    commands.entity(player_entity).insert(Shield { amount: shield_amount, remaining: 5.0 });
+                }
             }
         }
     }
@@ -260,26 +329,111 @@ fn ability_input(
         };
         cds.e = e_cd;
         mana.current -= mana_costs[2];
+        play_sfx(&mut commands, &sfx.cast);
+        let cid = champ_id_opt.map(|id| id.0);
         match kit {
             ChampionClass::Mage => {
-                let dash_target = player_pos + direction * 400.0;
-                commands.entity(player_entity).remove::<AttackTarget>().insert(
-                    MoveTarget { position: Vec2::new(dash_target.x, dash_target.z) }
-                );
+                let e_total = e_dmg + stats.ability_power * e_ratio;
+                if cid == Some(ChampionId::Lux) {
+                    // Lux E: Lucent Singularity — AOE slow zone
+                    spawn_aoe_cc(&mut commands, &mut meshes, &mut materials,
+                        target_pos, 175.0, e_total.max(80.0), 1.5, team.0,
+                        Color::srgba(1.0, 0.9, 0.5, 0.3), [2.0, 1.5, 0.5],
+                        Some(sg_core::BuffType::Slow { percent: 0.35 }), 1.5);
+                } else if cid == Some(ChampionId::Jinx) {
+                    // Jinx E: Flame Chompers — trap root zone
+                    spawn_aoe_cc(&mut commands, &mut meshes, &mut materials,
+                        target_pos, 120.0, e_total.max(60.0), 5.0, team.0,
+                        Color::srgba(1.0, 0.4, 0.1, 0.3), [1.5, 0.5, 0.0],
+                        Some(sg_core::BuffType::Root), 1.5);
+                } else if cid == Some(ChampionId::Teemo) {
+                    // Teemo E: Toxic Shot — passive (simplified: poison DOT AOE around self)
+                    spawn_aoe(&mut commands, &mut meshes, &mut materials,
+                        player_pos, 200.0, e_total.max(40.0) * 0.5, 3.0, team.0,
+                        Color::srgba(0.3, 0.7, 0.1, 0.2), [0.5, 1.0, 0.2]);
+                } else {
+                    // Default mage E: dash
+                    let dash_target = player_pos + direction * 400.0;
+                    commands.entity(player_entity).remove::<AttackTarget>().insert(
+                        MoveTarget { position: Vec2::new(dash_target.x, dash_target.z) }
+                    );
+                }
             }
             ChampionClass::Fighter => {
                 let e_total = e_dmg + stats.attack_damage * e_ratio;
-                spawn_skillshot_cc(&mut commands, &mut meshes, &mut materials,
-                    player_pos, direction, 1500.0, e_total, 800.0, team.0,
-                    Color::srgb(0.8, 0.4, 0.1), [1.5, 0.5, 0.0],
-                    Some(sg_core::BuffType::Stun), 1.0);
+                if cid == Some(ChampionId::Yasuo) {
+                    // Yasuo E: Sweeping Blade — dash through enemy direction
+                    let dash_target = player_pos + direction * 475.0;
+                    commands.entity(player_entity).remove::<AttackTarget>().insert(
+                        MoveTarget { position: Vec2::new(dash_target.x, dash_target.z) }
+                    );
+                    spawn_aoe(&mut commands, &mut meshes, &mut materials,
+                        dash_target, 80.0, e_total, 0.2, team.0,
+                        Color::srgba(0.5, 0.7, 0.9, 0.4), [1.0, 1.0, 1.5]);
+                } else if cid == Some(ChampionId::Jax) {
+                    // Jax E: Counter Strike — dodge + stun AOE
+                    commands.entity(player_entity).insert(Shield { amount: e_total * 0.5, remaining: 2.0 });
+                    spawn_aoe_cc(&mut commands, &mut meshes, &mut materials,
+                        player_pos, 200.0, e_total, 0.3, team.0,
+                        Color::srgba(0.8, 0.7, 0.2, 0.4), [1.5, 1.0, 0.3],
+                        Some(sg_core::BuffType::Stun), 1.0);
+                } else if cid == Some(ChampionId::Darius) {
+                    // Darius E: Apprehend — cone pull (simplified: stun skillshot)
+                    spawn_skillshot_cc(&mut commands, &mut meshes, &mut materials,
+                        player_pos, direction, 1800.0, e_total * 0.3, 535.0, team.0,
+                        Color::srgb(0.6, 0.1, 0.1), [1.0, 0.2, 0.0],
+                        Some(sg_core::BuffType::Stun), 1.0);
+                } else if cid == Some(ChampionId::Tryndamere) {
+                    // Tryndamere E: Spinning Slash — dash + AOE
+                    let dash_target = player_pos + direction * 660.0;
+                    commands.entity(player_entity).remove::<AttackTarget>().insert(
+                        MoveTarget { position: Vec2::new(dash_target.x, dash_target.z) }
+                    );
+                    spawn_aoe(&mut commands, &mut meshes, &mut materials,
+                        dash_target, 150.0, e_total, 0.3, team.0,
+                        Color::srgba(0.8, 0.2, 0.2, 0.4), [1.5, 0.3, 0.0]);
+                } else {
+                    spawn_skillshot_cc(&mut commands, &mut meshes, &mut materials,
+                        player_pos, direction, 1500.0, e_total, 800.0, team.0,
+                        Color::srgb(0.8, 0.4, 0.1), [1.5, 0.5, 0.0],
+                        Some(sg_core::BuffType::Stun), 1.0);
+                }
             }
             ChampionClass::Tank => {
                 let e_total = e_dmg + stats.attack_damage * e_ratio;
-                spawn_aoe_cc(&mut commands, &mut meshes, &mut materials,
-                    target_pos, 200.0, e_total, 1.0, team.0,
-                    Color::srgba(0.5, 0.4, 0.2, 0.3), [0.8, 0.5, 0.1],
-                    Some(sg_core::BuffType::Slow { percent: 0.4 }), 2.0);
+                if cid == Some(ChampionId::Thresh) {
+                    // Thresh E: Flay — push/pull AOE knockback (simplified: AOE + slow)
+                    spawn_aoe_cc(&mut commands, &mut meshes, &mut materials,
+                        player_pos + direction * 150.0, 200.0, e_total, 0.3, team.0,
+                        Color::srgba(0.2, 0.8, 0.2, 0.3), [0.5, 1.5, 0.5],
+                        Some(sg_core::BuffType::Slow { percent: 0.5 }), 1.5);
+                } else if cid == Some(ChampionId::Singed) {
+                    // Singed E: Fling — throw enemy behind (simplified: high damage + stun)
+                    spawn_aoe_cc(&mut commands, &mut meshes, &mut materials,
+                        player_pos + direction * 80.0, 100.0, e_total * 1.5, 0.2, team.0,
+                        Color::srgba(0.5, 0.7, 0.1, 0.4), [0.8, 1.2, 0.2],
+                        Some(sg_core::BuffType::Stun), 1.2);
+                } else if cid == Some(ChampionId::Mordekaiser) {
+                    // Mordekaiser E: Siphon of Destruction — cone damage
+                    spawn_aoe(&mut commands, &mut meshes, &mut materials,
+                        player_pos + direction * 200.0, 250.0, e_total, 0.3, team.0,
+                        Color::srgba(0.5, 0.3, 0.5, 0.4), [0.8, 0.3, 0.8]);
+                } else if cid == Some(ChampionId::Poppy) {
+                    // Poppy E: Heroic Charge — dash + stun on impact
+                    let dash_target = player_pos + direction * 475.0;
+                    commands.entity(player_entity).remove::<AttackTarget>().insert(
+                        MoveTarget { position: Vec2::new(dash_target.x, dash_target.z) }
+                    );
+                    spawn_aoe_cc(&mut commands, &mut meshes, &mut materials,
+                        dash_target, 100.0, e_total, 0.2, team.0,
+                        Color::srgba(0.9, 0.7, 0.2, 0.5), [2.0, 1.5, 0.3],
+                        Some(sg_core::BuffType::Stun), 1.5);
+                } else {
+                    spawn_aoe_cc(&mut commands, &mut meshes, &mut materials,
+                        target_pos, 200.0, e_total, 1.0, team.0,
+                        Color::srgba(0.5, 0.4, 0.2, 0.3), [0.8, 0.5, 0.1],
+                        Some(sg_core::BuffType::Slow { percent: 0.4 }), 2.0);
+                }
             }
         }
     }
@@ -294,15 +448,35 @@ fn ability_input(
         let r_total = r_dmg + if kit == ChampionClass::Fighter { stats.attack_damage * r_ratio } else { stats.ability_power * r_ratio };
         cds.r = r_cd;
         mana.current -= mana_costs[3];
+        play_sfx(&mut commands, &sfx.cast);
         match kit {
             ChampionClass::Mage => {
-                // AOE damage at target
-                spawn_aoe(&mut commands, &mut meshes, &mut materials,
-                    target_pos, 300.0, r_total, 0.3, team.0,
-                    Color::srgba(0.8, 0.1, 0.1, 0.3), [3.0, 0.0, 0.0]);
+                let cid = champ_id_opt.map(|id| id.0);
+                if cid == Some(ChampionId::Lux) {
+                    // Lux R: Final Spark — long range laser
+                    spawn_skillshot(&mut commands, &mut meshes, &mut materials,
+                        player_pos, direction, 4000.0, r_total, 3000.0, team.0,
+                        Color::srgb(1.0, 1.0, 0.7), [3.0, 3.0, 2.0]);
+                } else if cid == Some(ChampionId::Jinx) {
+                    // Jinx R: Super Mega Death Rocket — global skillshot
+                    spawn_skillshot(&mut commands, &mut meshes, &mut materials,
+                        player_pos, direction, 2000.0, r_total * 1.3, 15000.0, team.0,
+                        Color::srgb(1.0, 0.3, 0.5), [2.5, 0.5, 1.0]);
+                } else if cid == Some(ChampionId::Teemo) {
+                    // Teemo R: Noxious Trap — invisible AOE mine at target
+                    spawn_aoe_cc(&mut commands, &mut meshes, &mut materials,
+                        target_pos, 150.0, r_total, 10.0, team.0,
+                        Color::srgba(0.3, 0.6, 0.1, 0.15), [0.5, 1.0, 0.1],
+                        Some(sg_core::BuffType::Slow { percent: 0.5 }), 4.0);
+                } else {
+                    // Default (Annie): AOE damage at target
+                    spawn_aoe(&mut commands, &mut meshes, &mut materials,
+                        target_pos, 300.0, r_total, 0.3, team.0,
+                        Color::srgba(0.8, 0.1, 0.1, 0.3), [3.0, 0.0, 0.0]);
+                }
 
                 // Annie special: spawn Tibbers pet
-                if champ_id_opt.map(|id| id.0) == Some(ChampionId::Annie) {
+                if cid == Some(ChampionId::Annie) {
                     let tibbers_mesh = meshes.add(Sphere::new(40.0));
                     let tibbers_mat = materials.add(StandardMaterial {
                         base_color: Color::srgb(0.4, 0.2, 0.1),
@@ -337,11 +511,31 @@ fn ability_input(
             ChampionClass::Fighter => {
                 let cid = champ_id_opt.map(|id| id.0);
                 if cid == Some(ChampionId::Garen) {
-                    // Garen R: Demacian Justice — execute (more damage on low HP targets)
-                    // Deals r_total + 30% of target's missing HP as bonus
+                    // Garen R: Demacian Justice — execute (high burst)
                     spawn_aoe(&mut commands, &mut meshes, &mut materials,
                         target_pos, 150.0, r_total * 1.5, 0.2, team.0,
                         Color::srgba(1.0, 0.9, 0.2, 0.5), [3.0, 2.0, 0.0]);
+                } else if cid == Some(ChampionId::Yasuo) {
+                    // Yasuo R: Last Breath — AOE knockup (simplified: AOE stun + dash)
+                    let dash_target = target_pos;
+                    commands.entity(player_entity).remove::<AttackTarget>().insert(
+                        MoveTarget { position: Vec2::new(dash_target.x, dash_target.z) }
+                    );
+                    spawn_aoe_cc(&mut commands, &mut meshes, &mut materials,
+                        target_pos, 250.0, r_total, 0.5, team.0,
+                        Color::srgba(0.5, 0.7, 1.0, 0.4), [1.0, 1.5, 2.5],
+                        Some(sg_core::BuffType::Stun), 1.5);
+                } else if cid == Some(ChampionId::Jax) {
+                    // Jax R: Grandmaster's Might — massive resist buff (simplified: huge shield)
+                    commands.entity(player_entity).insert(Shield { amount: r_total * 2.0, remaining: 8.0 });
+                    spawn_aoe(&mut commands, &mut meshes, &mut materials,
+                        player_pos, 150.0, 0.0, 8.0, team.0,
+                        Color::srgba(0.9, 0.8, 0.2, 0.1), [1.5, 1.0, 0.0]);
+                } else if cid == Some(ChampionId::Darius) {
+                    // Darius R: Noxian Guillotine — execute (massive single-target)
+                    spawn_aoe(&mut commands, &mut meshes, &mut materials,
+                        target_pos, 100.0, r_total * 2.0, 0.2, team.0,
+                        Color::srgba(0.8, 0.0, 0.0, 0.5), [2.5, 0.2, 0.0]);
                 } else if cid == Some(ChampionId::MasterYi) {
                     // Yi R: Highlander — speed + attack speed buff
                     commands.entity(player_entity).insert(ActiveBuffs(vec![
@@ -374,6 +568,32 @@ fn ability_input(
                         player_pos, direction, 1500.0, r_total, 15000.0, team.0,
                         Color::srgb(0.3, 0.7, 1.0), [0.5, 1.5, 3.0],
                         Some(sg_core::BuffType::Stun), 2.5);
+                } else if cid == Some(ChampionId::Thresh) {
+                    // Thresh R: The Box — wall of slowing walls around self
+                    spawn_aoe_cc(&mut commands, &mut meshes, &mut materials,
+                        player_pos, 400.0, r_total, 2.0, team.0,
+                        Color::srgba(0.2, 0.9, 0.2, 0.3), [0.5, 2.0, 0.5],
+                        Some(sg_core::BuffType::Slow { percent: 0.99 }), 2.0);
+                } else if cid == Some(ChampionId::Singed) {
+                    // Singed R: Insanity Potion — all stats buff (simplified: shield + speed)
+                    commands.entity(player_entity).insert(Shield { amount: r_total * 0.5, remaining: 25.0 });
+                    commands.entity(player_entity).insert(ActiveBuffs(vec![
+                        sg_core::BuffData {
+                            buff_type: sg_core::BuffType::Slow { percent: -0.35 },
+                            duration: 25.0, remaining: 25.0, source: Some(player_entity),
+                        }
+                    ]));
+                } else if cid == Some(ChampionId::Mordekaiser) {
+                    // Mordekaiser R: Children of the Grave — heavy DOT
+                    spawn_aoe(&mut commands, &mut meshes, &mut materials,
+                        target_pos, 200.0, r_total * 0.5, 10.0, team.0,
+                        Color::srgba(0.3, 0.3, 0.3, 0.4), [0.5, 0.5, 0.5]);
+                } else if cid == Some(ChampionId::Poppy) {
+                    // Poppy R: Diplomatic Immunity — massive single-target AOE
+                    spawn_aoe_cc(&mut commands, &mut meshes, &mut materials,
+                        target_pos, 100.0, r_total * 1.5, 0.3, team.0,
+                        Color::srgba(1.0, 0.8, 0.2, 0.5), [2.5, 2.0, 0.5],
+                        Some(sg_core::BuffType::Stun), 1.0);
                 } else {
                     spawn_aoe_cc(&mut commands, &mut meshes, &mut materials,
                         player_pos, 350.0, r_total, 0.5, team.0,
@@ -541,5 +761,89 @@ fn tick_tibbers(
         if pet.lifetime <= 0.0 || health.current <= 0.0 {
             commands.entity(entity).despawn();
         }
+    }
+}
+
+/// Draw enhanced VFX for active abilities
+fn draw_ability_vfx(
+    mut gizmos: Gizmos,
+    time: Res<Time>,
+    skillshots: Query<(&Transform, &Skillshot)>,
+    aoes: Query<(&AoeZone,)>,
+    shields: Query<(&Transform, &Shield)>,
+    tibbers: Query<(&Transform, &TibbersPet)>,
+) {
+    let t = time.elapsed_secs();
+
+    // Skillshot trails: glowing circle + trailing line
+    for (tf, shot) in &skillshots {
+        let pos = tf.translation;
+        // Leading circle
+        gizmos.circle(
+            Isometry3d::from_translation(pos),
+            20.0,
+            Color::srgba(1.0, 1.0, 1.0, 0.6),
+        );
+        // Trail behind skillshot
+        let trail_end = pos - shot.direction * 80.0;
+        gizmos.line(pos, trail_end, Color::srgba(0.8, 0.8, 1.0, 0.3));
+        let trail_end2 = pos - shot.direction * 160.0;
+        gizmos.line(trail_end, trail_end2, Color::srgba(0.6, 0.6, 0.8, 0.15));
+    }
+
+    // AOE zones: pulsing ring + radial lines
+    for (aoe,) in &aoes {
+        let center = aoe.center + Vec3::Y * 3.0;
+        let pulse = 1.0 + (t * 4.0).sin() * 0.1;
+        let progress = (aoe.elapsed / aoe.duration).clamp(0.0, 1.0);
+        let alpha = 1.0 - progress;
+
+        // Outer pulsing ring
+        gizmos.circle(
+            Isometry3d::from_translation(center),
+            aoe.radius * pulse,
+            Color::srgba(1.0, 0.5, 0.2, alpha * 0.5),
+        );
+        // Inner ring
+        gizmos.circle(
+            Isometry3d::from_translation(center),
+            aoe.radius * 0.6 * pulse,
+            Color::srgba(1.0, 0.3, 0.1, alpha * 0.3),
+        );
+        // Radial lines
+        for i in 0..6 {
+            let angle = t * 2.0 + i as f32 * std::f32::consts::TAU / 6.0;
+            let end = center + Vec3::new(angle.cos(), 0.0, angle.sin()) * aoe.radius * pulse;
+            gizmos.line(center, end, Color::srgba(1.0, 0.4, 0.1, alpha * 0.2));
+        }
+    }
+
+    // Shield glow: blue sphere around shielded champions
+    for (tf, shield) in &shields {
+        if shield.amount > 0.0 {
+            let pulse = 1.0 + (t * 3.0).sin() * 0.05;
+            let alpha = (shield.remaining / 2.0).clamp(0.1, 0.3);
+            gizmos.sphere(
+                Isometry3d::from_translation(tf.translation + Vec3::Y * 50.0),
+                60.0 * pulse,
+                Color::srgba(0.3, 0.6, 1.0, alpha),
+            );
+        }
+    }
+
+    // Tibbers fire aura
+    for (tf, pet) in &tibbers {
+        let pulse = 1.0 + (t * 5.0).sin() * 0.2;
+        let alpha = (pet.lifetime / 5.0).clamp(0.1, 0.5);
+        gizmos.circle(
+            Isometry3d::from_translation(tf.translation + Vec3::Y * 5.0),
+            60.0 * pulse,
+            Color::srgba(1.0, 0.4, 0.0, alpha),
+        );
+        gizmos.circle(
+            Isometry3d::from_translation(tf.translation + Vec3::Y * 5.0),
+            40.0 * pulse,
+            Color::srgba(1.0, 0.6, 0.1, alpha * 0.7),
+        );
     }
 }

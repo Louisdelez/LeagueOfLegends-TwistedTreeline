@@ -74,6 +74,15 @@ pub struct CombatStats {
     pub spell_vamp: f32,
 }
 
+impl CombatStats {
+    pub const ZERO: Self = Self {
+        attack_damage: 0.0, ability_power: 0.0, armor: 0.0, magic_resist: 30.0,
+        attack_speed: 0.6, move_speed: 325.0, crit_chance: 0.0, cdr: 0.0,
+        armor_pen_flat: 0.0, armor_pen_pct: 0.0, magic_pen_flat: 0.0, magic_pen_pct: 0.0,
+        life_steal: 0.0, spell_vamp: 0.0,
+    };
+}
+
 #[derive(Component, Debug)]
 pub struct Gold(pub f32);
 
@@ -154,6 +163,13 @@ pub struct GameStats {
     pub gold_earned: f32,
     pub damage_dealt: f32,
     pub damage_taken: f32,
+    pub damage_to_champions: f32,
+    pub damage_to_structures: f32,
+    pub healing_done: f32,
+    pub wards_placed: u32,
+    pub largest_multi_kill: u32,
+    pub current_multi_kill: u32,
+    pub multi_kill_timer: f32,
 }
 
 // === CC Markers ===

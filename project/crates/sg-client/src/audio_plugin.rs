@@ -21,6 +21,7 @@ pub struct SfxHandles {
     pub death: Option<Handle<AudioSource>>,
     pub levelup: Option<Handle<AudioSource>>,
     pub gold: Option<Handle<AudioSource>>,
+    pub cast: Option<Handle<AudioSource>>,
 }
 
 fn load_sfx(mut sfx: ResMut<SfxHandles>, asset_server: Res<AssetServer>) {
@@ -28,6 +29,7 @@ fn load_sfx(mut sfx: ResMut<SfxHandles>, asset_server: Res<AssetServer>) {
     sfx.death = Some(asset_server.load("audio/death.ogg"));
     sfx.levelup = Some(asset_server.load("audio/levelup.ogg"));
     sfx.gold = Some(asset_server.load("audio/gold.ogg"));
+    sfx.cast = Some(asset_server.load("audio/cast.ogg"));
 }
 
 /// Call this from other systems to play a one-shot SFX

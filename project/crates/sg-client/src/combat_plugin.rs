@@ -11,6 +11,7 @@ use crate::spawn_plugin::GameTimer;
 use crate::map_plugin::MapData;
 use crate::menu::AppState;
 use crate::shop_plugin::{PlayerInventory, ItemDatabase, InventoryChanged, total_item_bonuses};
+use crate::audio_plugin::{SfxHandles, play_sfx};
 
 #[derive(Resource, Default)]
 pub struct FirstBloodState {
@@ -43,13 +44,23 @@ impl Plugin for CombatPlugin {
                 blue_top_respawn: 0.0, blue_bot_respawn: 0.0,
                 red_top_respawn: 0.0, red_bot_respawn: 0.0,
             })
+            // Target acquisition runs in AI phase (BEFORE movement)
             .add_systems(
             Update,
             (
                 turret_acquire_target,
-                minion_acquire_target,
                 jungle_camp_acquire_target,
                 champion_acquire_target,
+            )
+                .chain()
+                .in_set(GameSet::AI)
+                .run_if(in_state(AppState::InGame)),
+        )
+            // Combat execution runs in Combat phase (AFTER movement)
+            .add_systems(
+            Update,
+            (
+                auto_follow_target,
                 execute_auto_attacks,
                 gold_and_xp_on_kill,
                 passive_gold,
@@ -64,12 +75,12 @@ impl Plugin for CombatPlugin {
             .add_systems(
             Update,
             (
-                cleanup_dead_minions,
                 fountain_heal,
                 hp_mana_regen,
                 tick_damage_popups,
                 draw_damage_popups,
                 draw_level_up_effects,
+                draw_bounty_popups,
                 bot_decision,
                 check_inhibitor_destroyed,
                 tick_inhibitor_respawn,
@@ -77,6 +88,7 @@ impl Plugin for CombatPlugin {
                 surrender_vote,
                 check_nexus_destroyed,
                 recalculate_stats,
+                draw_cc_indicators,
             )
                 .chain()
                 .in_set(GameSet::Combat)
@@ -149,29 +161,80 @@ fn turret_acquire_target(
     }
 }
 
+/// Minion target acquisition with LoL priority system
+/// Priority: 6=closest enemy minion, 7=closest enemy champion, 8=closest structure
 fn minion_acquire_target(
     mut commands: Commands,
     minions: Query<
         (Entity, &Transform, &TeamMember),
         (With<Minion>, Without<AttackTarget>, Without<Dead>),
     >,
-    enemies: Query<(Entity, &Transform, &TeamMember, &Health), Or<(With<Minion>, With<Structure>)>>,
+    enemy_minions: Query<(Entity, &Transform, &TeamMember, &Health), (With<Minion>, Without<Dead>)>,
+    enemy_champs: Query<(Entity, &Transform, &TeamMember, &Health), (With<Champion>, Without<Dead>)>,
+    structures: Query<(Entity, &Transform, &TeamMember, &Health), (With<Structure>, Without<Dead>)>,
 ) {
     for (entity, tf, team) in &minions {
-        let mut closest: Option<(Entity, f32)> = None;
-        for (enemy_entity, enemy_tf, enemy_team, health) in &enemies {
-            if enemy_team.0 == team.0 || health.current <= 0.0 { continue; }
-            let dist = tf.translation.distance(enemy_tf.translation);
-            if dist > 475.0 { continue; }
-            if closest.map_or(true, |(_, d)| dist < d) {
-                closest = Some((enemy_entity, dist));
+        let pos = tf.translation;
+        let mut best: Option<(Entity, u8, f32)> = None; // (entity, priority, dist)
+
+        // Priority 6: closest enemy minion (most common target)
+        for (e, e_tf, e_team, e_hp) in &enemy_minions {
+            if e_team.0 == team.0 || e_hp.current <= 0.0 { continue; }
+            let dist = pos.distance(e_tf.translation);
+            if dist > 500.0 { continue; }
+            if best.map_or(true, |(_, bp, bd)| 6 < bp || (6 == bp && dist < bd)) {
+                best = Some((e, 6, dist));
             }
         }
-        if let Some((target, _)) = closest {
+
+        // Priority 7: closest enemy champion
+        for (e, e_tf, e_team, e_hp) in &enemy_champs {
+            if e_team.0 == team.0 || e_hp.current <= 0.0 { continue; }
+            let dist = pos.distance(e_tf.translation);
+            if dist > 500.0 { continue; }
+            if best.map_or(true, |(_, bp, bd)| 7 < bp || (7 == bp && dist < bd)) {
+                best = Some((e, 7, dist));
+            }
+        }
+
+        // Priority 8: closest enemy structure
+        for (e, e_tf, e_team, e_hp) in &structures {
+            if e_team.0 == team.0 || e_hp.current <= 0.0 { continue; }
+            let dist = pos.distance(e_tf.translation);
+            if dist > 500.0 { continue; }
+            if best.map_or(true, |(_, bp, bd)| 8 < bp || (8 == bp && dist < bd)) {
+                best = Some((e, 8, dist));
+            }
+        }
+
+        if let Some((target, _, _)) = best {
             commands.entity(entity)
                 .insert(AttackTarget { entity: target })
                 .insert(AttackCooldown(0.0))
-                .remove::<MoveTarget>();
+                .remove::<MoveTarget>()
+                .remove::<crate::navigation_plugin::NavGoal>()
+                .remove::<crate::navigation_plugin::NavPath>();
+        }
+    }
+}
+
+/// Minions drop their target when it dies or leaves range, and resume patrol
+fn minion_retarget(
+    mut commands: Commands,
+    minions: Query<(Entity, &Transform, &AttackTarget), (With<Minion>, Without<Dead>)>,
+    targets: Query<(&Transform, &Health)>,
+) {
+    for (entity, tf, target) in &minions {
+        let should_drop = if let Ok((tgt_tf, tgt_hp)) = targets.get(target.entity) {
+            tgt_hp.current <= 0.0 || tf.translation.distance(tgt_tf.translation) > 700.0
+        } else {
+            true // target despawned
+        };
+
+        if should_drop {
+            if let Ok(mut ecmd) = commands.get_entity(entity) {
+                ecmd.remove::<AttackTarget>();
+            }
         }
     }
 }
@@ -205,7 +268,7 @@ fn champion_acquire_target(
         (Entity, &Transform, &TeamMember, &AutoAttackRange),
         (With<PlayerControlled>, Without<MoveTarget>, Without<AttackTarget>, Without<Dead>),
     >,
-    enemies: Query<(Entity, &Transform, &TeamMember, &Health), Or<(With<Minion>, With<Structure>)>>,
+    enemies: Query<(Entity, &Transform, &TeamMember, &Health), Or<(With<Minion>, With<Structure>, With<Champion>)>>,
 ) {
     let Ok((player_entity, player_tf, player_team, range)) = player_q.single() else { return };
     let mut closest: Option<(Entity, f32)> = None;
@@ -231,74 +294,136 @@ struct DamagePopup {
     velocity_y: f32,
 }
 
+/// Auto-follow: when a champion has AttackTarget but is out of range, move toward target
+/// This is the core LoL mechanic: right-click enemy = walk to range + attack
+fn auto_follow_target(
+    mut commands: Commands,
+    attackers: Query<(Entity, &Transform, &AttackTarget, &AutoAttackRange, Option<&Minion>), Without<Dead>>,
+    alive_entities: Query<&Transform, Without<Dead>>,
+) {
+    // Collect actions first to avoid borrow issues with despawned entities
+    struct FollowAction { entity: Entity, action: u8, pos: Vec2 } // 0=stop, 1=move_direct, 2=nav_goal, 3=remove_target
+    let mut actions = Vec::new();
+
+    for (entity, atk_tf, target, range, is_minion) in &attackers {
+        if entity == target.entity { continue; }
+        let Ok(tgt_tf) = alive_entities.get(target.entity) else {
+            actions.push(FollowAction { entity, action: 3, pos: Vec2::ZERO });
+            continue;
+        };
+        let tgt_pos = tgt_tf.translation;
+        let dist = atk_tf.translation.distance(tgt_pos);
+        if dist > range.0 + 30.0 {
+            let pos = Vec2::new(tgt_pos.x, tgt_pos.z);
+            if is_minion.is_some() {
+                actions.push(FollowAction { entity, action: 1, pos });
+            } else {
+                actions.push(FollowAction { entity, action: 2, pos });
+            }
+        } else {
+            actions.push(FollowAction { entity, action: 0, pos: Vec2::ZERO });
+        }
+    }
+
+    // Apply actions (safe — entity might have been despawned but commands will silently fail)
+    for a in actions {
+        if let Ok(mut ecmd) = commands.get_entity(a.entity) {
+            match a.action {
+                0 => { ecmd.remove::<MoveTarget>().remove::<crate::navigation_plugin::NavGoal>().remove::<crate::navigation_plugin::NavPath>(); }
+                1 => { ecmd.insert(MoveTarget { position: a.pos }); }
+                2 => { ecmd.insert(crate::navigation_plugin::NavGoal { position: a.pos }); }
+                3 => { ecmd.remove::<AttackTarget>(); }
+                _ => {}
+            }
+        }
+    }
+}
+
 fn execute_auto_attacks(
     mut commands: Commands,
     time: Res<Time>,
+    sfx: Res<SfxHandles>,
     mut attackers: Query<(
         Entity, &Transform, &CombatStats, &mut AttackCooldown, &AttackTarget, &AutoAttackRange,
-        Option<&mut TurretAggro>, Option<&Structure>,
-    ), Without<Stunned>>,
-    mut targets: Query<(&Transform, &mut Health, Option<&CombatStats>, Option<&mut crate::ability_plugin::Shield>), Without<AttackCooldown>>,
+    ), (Without<Stunned>, Without<Structure>, Without<Minion>)>,
+    mut turret_attackers: Query<(
+        Entity, &Transform, &CombatStats, &mut AttackCooldown, &AttackTarget, &AutoAttackRange,
+        &mut TurretAggro,
+    ), With<Structure>>,
+    mut targets: Query<(&Transform, &mut Health, Option<&CombatStats>, Option<&mut crate::ability_plugin::Shield>)>,
 ) {
-    for (entity, _atk_tf, stats, mut cooldown, target, _range, turret_aggro, structure) in &mut attackers {
+    // Phase 1: Collect all attacks (read-only pass on attackers)
+    struct Attack { atk: Entity, tgt: Entity, ad: f32, atk_speed: f32, range: f32, atk_pos: Vec3 }
+    let mut attacks: Vec<Attack> = Vec::new();
+
+    // Champion/minion attackers
+    for (entity, atk_tf, stats, mut cooldown, target, range) in &mut attackers {
         cooldown.0 -= time.delta_secs();
         if cooldown.0 > 0.0 { continue; }
+        attacks.push(Attack {
+            atk: entity, tgt: target.entity, ad: stats.attack_damage,
+            atk_speed: stats.attack_speed, range: range.0, atk_pos: atk_tf.translation,
+        });
+    }
 
-        let Ok((tgt_tf, mut tgt_health, tgt_stats, tgt_shield)) = targets.get_mut(target.entity) else {
-            commands.entity(entity).remove::<AttackTarget>();
+    // Turret attackers
+    for (entity, atk_tf, stats, mut cooldown, target, range, _aggro) in &mut turret_attackers {
+        cooldown.0 -= time.delta_secs();
+        if cooldown.0 > 0.0 { continue; }
+        attacks.push(Attack {
+            atk: entity, tgt: target.entity, ad: stats.attack_damage * 1.25, // turret bonus
+            atk_speed: stats.attack_speed, range: range.0, atk_pos: atk_tf.translation,
+        });
+    }
+
+    // Phase 2: Apply damage
+    for atk in attacks {
+        let Ok((tgt_tf, mut tgt_health, tgt_stats, tgt_shield)) = targets.get_mut(atk.tgt) else {
+            commands.entity(atk.atk).remove::<AttackTarget>();
             continue;
         };
 
         if tgt_health.current <= 0.0 {
-            commands.entity(entity).remove::<AttackTarget>();
+            commands.entity(atk.atk).remove::<AttackTarget>();
             continue;
         }
 
-        cooldown.0 = 1.0 / stats.attack_speed;
-
-        let raw_damage = stats.attack_damage;
-        let mut damage = if let Some(target_stats) = tgt_stats {
-            calculate_damage(raw_damage, DamageType::Physical, stats, target_stats)
-        } else {
-            raw_damage
-        };
-
-        // Turret damage ramp: +25% per consecutive hit on same champion (max +75%)
-        if structure.is_some() {
-            if let Some(mut aggro) = turret_aggro {
-                if aggro.last_target == Some(target.entity) {
-                    aggro.consecutive_hits = (aggro.consecutive_hits + 1).min(3);
-                } else {
-                    aggro.consecutive_hits = 0;
-                    aggro.last_target = Some(target.entity);
-                }
-                damage *= 1.0 + 0.25 * aggro.consecutive_hits as f32;
-            }
+        // Range check
+        let dist = atk.atk_pos.distance(tgt_tf.translation);
+        if dist > atk.range + 50.0 {
+            continue; // auto_follow_target will move us closer
         }
 
-        // Shield absorbs damage first
+        // Reset cooldown
+        if let Ok((_, _, _, mut cd, _, _)) = attackers.get_mut(atk.atk) {
+            cd.0 = 1.0 / atk.atk_speed;
+        } else if let Ok((_, _, _, mut cd, _, _, _)) = turret_attackers.get_mut(atk.atk) {
+            cd.0 = 1.0 / atk.atk_speed;
+        }
+
+        // Calculate damage with armor reduction
+        let mut damage = if let Some(def_stats) = tgt_stats {
+            calculate_damage(atk.ad, DamageType::Physical,
+                &CombatStats { attack_damage: atk.ad, ..CombatStats::ZERO }, def_stats)
+        } else {
+            atk.ad
+        };
+
+        // Shield absorption
         if let Some(mut shield) = tgt_shield {
             if shield.amount > 0.0 {
-                if shield.amount >= damage {
-                    shield.amount -= damage;
-                    damage = 0.0;
-                } else {
-                    damage -= shield.amount;
-                    shield.amount = 0.0;
-                }
+                if shield.amount >= damage { shield.amount -= damage; damage = 0.0; }
+                else { damage -= shield.amount; shield.amount = 0.0; }
             }
         }
 
         tgt_health.current -= damage;
+        play_sfx(&mut commands, &sfx.hit);
 
-        // Spawn damage number popup
+        // Damage popup
         let popup_pos = tgt_tf.translation + Vec3::new(
-            (rand::random::<f32>() - 0.5) * 40.0,
-            150.0,
-            (rand::random::<f32>() - 0.5) * 40.0,
+            (rand::random::<f32>() - 0.5) * 40.0, 150.0, (rand::random::<f32>() - 0.5) * 40.0,
         );
-        // Use gizmo text would be ideal but Bevy doesn't have 3D text easily
-        // Instead we track damage popups and render them as gizmos in a separate system
         commands.spawn((
             Transform::from_translation(popup_pos),
             DamagePopup { lifetime: 1.0, velocity_y: 80.0 },
@@ -313,37 +438,24 @@ struct DamageAmount(f32);
 #[derive(Component)]
 struct GoldPopup(f32);
 
+#[derive(Component)]
+struct BountyPopup {
+    gold: f32,
+    is_shutdown: bool,
+}
+
 /// Award gold and XP when a minion or jungle camp dies near a champion
 fn gold_and_xp_on_kill(
     mut commands: Commands,
+    sfx: Res<SfxHandles>,
     game_timer: Res<GameTimer>,
     mut champions: Query<(&Transform, &mut Gold, &mut Champion, &TeamMember, &mut GameStats)>,
     minions: Query<(&Transform, &Health, &Minion, &TeamMember)>,
     jungle_camps: Query<(&Transform, &Health, &JungleCamp)>,
 ) {
     for (champ_tf, mut gold, mut champion, champ_team, mut stats) in &mut champions {
-        // Minion kills
-        for (minion_tf, health, minion, minion_team) in &minions {
-            if minion_team.0 == champ_team.0 || health.current > 0.0 { continue; }
-            let dist = champ_tf.translation.distance(minion_tf.translation);
-            if dist < 550.0 {
-                let g = minion_gold(minion.minion_type, game_timer.elapsed);
-                gold.0 += g;
-                stats.cs += 1;
-                stats.gold_earned += g;
-                // Gold popup
-                commands.spawn((
-                    Transform::from_translation(minion_tf.translation + Vec3::Y * 120.0),
-                    DamagePopup { lifetime: 0.8, velocity_y: 60.0 },
-                    GoldPopup(g),
-                ));
-            }
-            if dist < XP_RANGE {
-                let base_xp = kill_xp(1, champion.level);
-                let xp = shared_xp(base_xp, 1);
-                champion.xp += xp;
-            }
-        }
+        // Minion gold/xp is handled by MinionPlugin (minion_gold_xp system)
+        // Only jungle camps remain here
 
         // Jungle camp kills
         for (camp_tf, health, camp) in &jungle_camps {
@@ -386,13 +498,15 @@ fn passive_gold(
 /// Level up when XP threshold reached
 fn check_level_up(
     mut commands: Commands,
+    sfx: Res<SfxHandles>,
     mut query: Query<(Entity, &Transform, &mut Champion)>,
 ) {
     for (_entity, tf, mut champion) in &mut query {
         let new_level = level_from_xp(champion.xp);
         if new_level > champion.level && new_level <= 18 {
-            let old = champion.level;
+            let _old = champion.level;
             champion.level = new_level;
+            play_sfx(&mut commands, &sfx.levelup);
             // Level up visual effect
             commands.spawn((
                 Transform::from_translation(tf.translation + Vec3::Y * 80.0),
@@ -409,6 +523,7 @@ struct LevelUpEffect(u8);
 /// Handle champion death — award kill gold/XP with bounty system
 fn handle_champion_death(
     mut commands: Commands,
+    sfx: Res<SfxHandles>,
     game_timer: Res<GameTimer>,
     mut first_blood: ResMut<FirstBloodState>,
     mut champs: Query<(Entity, &Health, &mut Champion, &TeamMember, &Transform, &mut KillStreak, &mut GameStats, &mut Gold), Without<Dead>>,
@@ -423,6 +538,7 @@ fn handle_champion_death(
         let timer = death_timer(*dead_level, game_timer.elapsed);
         commands.entity(*dead_entity).insert(Dead { respawn_timer: timer });
         commands.entity(*dead_entity).insert(Visibility::Hidden);
+        play_sfx(&mut commands, &sfx.death);
 
         // Find closest enemy champion within XP_RANGE to award kill gold
         let mut best: Option<(Entity, f32)> = None;
@@ -444,7 +560,6 @@ fn handle_champion_death(
                 if !first_blood.awarded {
                     total += FIRST_BLOOD_BONUS;
                     first_blood.awarded = true;
-                    println!("FIRST BLOOD!");
                 }
 
                 killer_gold.0 += total;
@@ -455,7 +570,14 @@ fn handle_champion_death(
                 let xp = kill_xp(*dead_level, killer_champ.level);
                 killer_champ.xp += xp;
 
-                println!("Champion kill! +{:.0}g", total);
+
+                // Bounty popup
+                let is_shutdown = *victim_kills >= 3;
+                commands.spawn((
+                    Transform::from_translation(*dead_pos + Vec3::Y * 200.0),
+                    DamagePopup { lifetime: 2.0, velocity_y: 50.0 },
+                    BountyPopup { gold: total, is_shutdown },
+                ));
             }
         }
 
@@ -502,7 +624,56 @@ fn cleanup_dead_minions(
 ) {
     for (entity, health) in &query {
         if health.current <= 0.0 {
-            commands.entity(entity).despawn();
+            // Despawn dead minions (instant for now)
+            if let Ok(mut ecmd) = commands.get_entity(entity) {
+                ecmd.despawn();
+            }
+        }
+    }
+}
+
+/// Push ALL units apart based on their collision radii (LoL creep block)
+/// Melee/Caster radius: 48, Siege/Super radius: 65, Champions: 35
+fn unit_separation(
+    mut units: Query<(Entity, &mut Transform, Option<&Minion>, Option<&Champion>), Without<Dead>>,
+) {
+    // Collect all positions + radii
+    let data: Vec<(Entity, Vec3, f32)> = units.iter()
+        .map(|(e, tf, minion, champ)| {
+            let radius = if champ.is_some() {
+                35.0
+            } else if let Some(m) = minion {
+                match m.minion_type {
+                    sg_core::types::MinionType::Siege | sg_core::types::MinionType::Super => 65.0,
+                    _ => 48.0,
+                }
+            } else {
+                35.0
+            };
+            (e, tf.translation, radius)
+        })
+        .collect();
+
+    for (entity, mut tf, _, _) in &mut units {
+        let my_pos = tf.translation;
+        let my_radius = data.iter().find(|(e, _, _)| *e == entity).map(|(_, _, r)| *r).unwrap_or(35.0);
+        let mut push = Vec3::ZERO;
+
+        for (other_e, other_pos, other_radius) in &data {
+            if *other_e == entity { continue; }
+            let diff = my_pos - *other_pos;
+            let dist_xz = Vec2::new(diff.x, diff.z).length();
+            let min_dist = my_radius + other_radius;
+            if dist_xz < min_dist && dist_xz > 0.1 {
+                let overlap = min_dist - dist_xz;
+                let dir = Vec3::new(diff.x, 0.0, diff.z).normalize_or_zero();
+                push += dir * overlap * 0.5;
+            }
+        }
+
+        if push.length() > 0.1 {
+            tf.translation.x += push.x;
+            tf.translation.z += push.z;
         }
     }
 }
@@ -578,6 +749,86 @@ fn draw_level_up_effects(
     }
 }
 
+fn draw_bounty_popups(
+    mut gizmos: Gizmos,
+    popups: Query<(&Transform, &DamagePopup, &BountyPopup)>,
+) {
+    for (tf, popup, bounty) in &popups {
+        let alpha = popup.lifetime.clamp(0.0, 1.0);
+        let color = if bounty.is_shutdown {
+            Color::srgba(1.0, 0.3, 0.0, alpha) // orange for shutdown
+        } else {
+            Color::srgba(1.0, 0.85, 0.0, alpha) // gold
+        };
+        let size = 15.0 + (bounty.gold / 50.0).min(25.0);
+        gizmos.sphere(Isometry3d::from_translation(tf.translation), size, color);
+        if bounty.is_shutdown {
+            gizmos.circle(
+                Isometry3d::from_translation(tf.translation),
+                size + 10.0,
+                Color::srgba(1.0, 0.1, 0.0, alpha * 0.6),
+            );
+        }
+    }
+}
+
+/// Draw visual CC indicators above affected units
+fn draw_cc_indicators(
+    mut gizmos: Gizmos,
+    time: Res<Time>,
+    query: Query<(&Transform, Option<&Stunned>, Option<&Rooted>, Option<&Silenced>)>,
+) {
+    let t = time.elapsed_secs();
+    for (tf, stunned, rooted, silenced) in &query {
+        let head = tf.translation + Vec3::Y * 160.0;
+
+        if stunned.is_some() {
+            // Yellow spinning stars above head
+            let spin = t * 5.0;
+            for i in 0..3 {
+                let angle = spin + i as f32 * std::f32::consts::TAU / 3.0;
+                let offset = Vec3::new(angle.cos() * 30.0, 0.0, angle.sin() * 30.0);
+                gizmos.sphere(
+                    Isometry3d::from_translation(head + offset),
+                    8.0,
+                    Color::srgba(1.0, 0.9, 0.0, 0.9),
+                );
+            }
+        }
+
+        if rooted.is_some() {
+            // Green circle at feet
+            let feet = tf.translation + Vec3::Y * 2.0;
+            let pulse = 1.0 + (t * 3.0).sin() * 0.15;
+            gizmos.circle(
+                Isometry3d::from_translation(feet),
+                50.0 * pulse,
+                Color::srgba(0.2, 0.8, 0.1, 0.7),
+            );
+            gizmos.circle(
+                Isometry3d::from_translation(feet),
+                30.0 * pulse,
+                Color::srgba(0.1, 0.6, 0.1, 0.5),
+            );
+        }
+
+        if silenced.is_some() {
+            // Red X above head
+            let size = 20.0;
+            gizmos.line(
+                head + Vec3::new(-size, size, 0.0),
+                head + Vec3::new(size, -size, 0.0),
+                Color::srgba(1.0, 0.1, 0.1, 0.8),
+            );
+            gizmos.line(
+                head + Vec3::new(-size, -size, 0.0),
+                head + Vec3::new(size, size, 0.0),
+                Color::srgba(1.0, 0.1, 0.1, 0.8),
+            );
+        }
+    }
+}
+
 /// Heal champions standing in their fountain
 fn fountain_heal(
     time: Res<Time>,
@@ -622,22 +873,18 @@ fn check_inhibitor_destroyed(
             (Team::Blue, Some(Lane::Top)) if inhib_state.blue_top_alive => {
                 inhib_state.blue_top_alive = false;
                 inhib_state.blue_top_respawn = game_timer.elapsed + INHIBITOR_RESPAWN_TIME;
-                println!("Blue top inhibitor destroyed!");
             }
             (Team::Blue, Some(Lane::Bottom)) if inhib_state.blue_bot_alive => {
                 inhib_state.blue_bot_alive = false;
                 inhib_state.blue_bot_respawn = game_timer.elapsed + INHIBITOR_RESPAWN_TIME;
-                println!("Blue bottom inhibitor destroyed!");
             }
             (Team::Red, Some(Lane::Top)) if inhib_state.red_top_alive => {
                 inhib_state.red_top_alive = false;
                 inhib_state.red_top_respawn = game_timer.elapsed + INHIBITOR_RESPAWN_TIME;
-                println!("Red top inhibitor destroyed!");
             }
             (Team::Red, Some(Lane::Bottom)) if inhib_state.red_bot_alive => {
                 inhib_state.red_bot_alive = false;
                 inhib_state.red_bot_respawn = game_timer.elapsed + INHIBITOR_RESPAWN_TIME;
-                println!("Red bottom inhibitor destroyed!");
             }
             _ => {}
         }
@@ -667,7 +914,6 @@ fn tick_inhibitor_respawn(
                     && structure.lane == Some(lane)
                 {
                     health.current = health.max;
-                    println!("{:?} {:?} inhibitor respawned!", team, lane);
                 }
             }
             match (team, lane) {
@@ -690,7 +936,7 @@ fn bot_decision(
     mut bots: Query<(
         Entity, &Transform, &mut BotController, &TeamMember, &Health, &AutoAttackRange,
         &mut Gold, &CombatStats,
-    ), (With<Champion>, Without<Dead>, Without<PlayerControlled>)>,
+    ), (With<Champion>, Without<Dead>)>,
     potential_targets: Query<(Entity, &Transform, &TeamMember, &Health), (Without<Dead>, Without<BotController>)>,
     enemy_champs: Query<(Entity, &Transform, &TeamMember, &Health), (With<Champion>, Without<Dead>)>,
     minions: Query<(Entity, &Transform, &TeamMember, &Health), (With<Minion>, Without<Dead>)>,
@@ -698,10 +944,11 @@ fn bot_decision(
 ) {
     let dt = time.delta_secs();
 
+    // Bot AI decision loop
     for (entity, tf, mut bot, team, health, range, mut gold, _stats) in &mut bots {
         bot.decision_timer -= dt;
         if bot.decision_timer > 0.0 { continue; }
-        bot.decision_timer = 0.5;
+        bot.decision_timer = 0.2;
 
         let pos = Vec2::new(tf.translation.x, tf.translation.z);
         let hp_pct = health.current / health.max;
@@ -733,11 +980,14 @@ fn bot_decision(
             bot.state = BotState::Retreating;
         } else if hp_pct > 0.80 && bot.state == BotState::Retreating {
             bot.state = BotState::Laning;
+            bot.patrol_set = false; // Reset patrol to re-find closest waypoint
         }
 
         match bot.state {
             BotState::Retreating => {
-                commands.entity(entity).remove::<AttackTarget>().insert(MoveTarget { position: fountain });
+                commands.entity(entity).remove::<AttackTarget>()
+                    .insert(crate::navigation_plugin::NavGoal { position: fountain })
+                    .remove::<crate::navigation_plugin::NavPath>();
             }
             BotState::Laning | BotState::Fighting => {
                 // Priority 1: Low HP enemy champion nearby (finish them off)
@@ -746,7 +996,7 @@ fn bot_decision(
                 for (e, e_tf, e_team, e_health) in &enemy_champs {
                     if e_team.0 == team.0 || e_health.current <= 0.0 { continue; }
                     let dist = pos.distance(Vec2::new(e_tf.translation.x, e_tf.translation.z));
-                    if dist < 900.0 {
+                    if dist < 1500.0 {
                         let ehp = e_health.current / e_health.max;
                         if ehp < 0.4 && low_champ.map_or(true, |(_, _, h)| ehp < h) {
                             low_champ = Some((e, dist, ehp));
@@ -780,8 +1030,13 @@ fn bot_decision(
                             .insert(AttackTarget { entity: target })
                             .insert(AttackCooldown(0.0));
                     } else {
-                        // Move toward enemy champ but don't attack yet
-                        bot.state = BotState::Laning;
+                        // Move toward enemy champion to engage
+                        bot.state = BotState::Fighting;
+                        if let Ok((_, e_tf, _, _)) = enemy_champs.get(target) {
+                            commands.entity(entity).insert(crate::navigation_plugin::NavGoal {
+                                position: Vec2::new(e_tf.translation.x, e_tf.translation.z),
+                            }).remove::<crate::navigation_plugin::NavPath>();
+                        }
                     }
                 } else if let Some((target, _)) = weakest_minion {
                     bot.state = BotState::Laning;
@@ -789,7 +1044,7 @@ fn bot_decision(
                         .insert(AttackTarget { entity: target })
                         .insert(AttackCooldown(0.0));
                 } else {
-                    // No targets: push lane along waypoints
+                    // No targets: follow lane waypoints sequentially (like minions)
                     bot.state = BotState::Laning;
                     let waypoints = match (team.0, bot.assigned_lane) {
                         (Team::Blue, sg_core::types::Lane::Top) => &map.0.lane_paths.top_blue,
@@ -798,31 +1053,40 @@ fn bot_decision(
                         (Team::Red, sg_core::types::Lane::Bottom) => &map.0.lane_paths.bottom_red,
                         _ => &map.0.lane_paths.top_blue,
                     };
-                    // Find closest waypoint ahead
-                    let forward_dir = if team.0 == Team::Blue { 1.0f32 } else { -1.0 };
-                    let mut best_wp: Option<Vec2> = None;
-                    let mut best_dist = f32::MAX;
-                    for wp in waypoints {
-                        let d = pos.distance(*wp);
-                        let ahead = (wp.x - pos.x) * forward_dir > -200.0;
-                        if ahead && d < best_dist && d > 100.0 {
-                            best_dist = d;
-                            best_wp = Some(*wp);
+
+                    if waypoints.is_empty() { continue; }
+
+                    // Initialize: find closest waypoint as starting index
+                    if !bot.patrol_set {
+                        let mut closest_idx = 0;
+                        let mut closest_dist = f32::MAX;
+                        for (i, wp) in waypoints.iter().enumerate() {
+                            let d = pos.distance(*wp);
+                            if d < closest_dist {
+                                closest_dist = d;
+                                closest_idx = i;
+                            }
+                        }
+                        bot.lane_waypoint_index = closest_idx;
+                        bot.patrol_set = true;
+                    }
+
+                    // Advance to next waypoint if close enough
+                    let idx = bot.lane_waypoint_index.min(waypoints.len() - 1);
+                    let current_wp = waypoints[idx];
+                    if pos.distance(current_wp) < 200.0 {
+                        if bot.lane_waypoint_index < waypoints.len() - 1 {
+                            bot.lane_waypoint_index += 1;
+                        } else {
+                            // Reached end of lane — loop back or stay
+                            bot.lane_waypoint_index = 0;
                         }
                     }
-                    if let Some(wp) = best_wp {
-                        commands.entity(entity).insert(MoveTarget { position: wp });
-                    } else {
-                        // Fallback: move toward enemy base
-                        let target_x = if team.0 == Team::Blue { pos.x + 500.0 } else { pos.x - 500.0 };
-                        let lane_z = match bot.assigned_lane {
-                            sg_core::types::Lane::Top => 9500.0,
-                            sg_core::types::Lane::Bottom => 5000.0,
-                        };
-                        commands.entity(entity).insert(MoveTarget {
-                            position: Vec2::new(target_x.clamp(500.0, 14900.0), lane_z),
-                        });
-                    }
+
+                    let target_idx = bot.lane_waypoint_index.min(waypoints.len() - 1);
+                    commands.entity(entity)
+                        .insert(crate::navigation_plugin::NavGoal { position: waypoints[target_idx] })
+                        .remove::<crate::navigation_plugin::NavPath>();
                 }
             }
             BotState::Dead => {}
@@ -936,7 +1200,6 @@ fn surrender_vote(
 ) {
     if existing_result.is_some() { return; }
     if keys.just_pressed(KeyCode::F6) {
-        println!("=== SURRENDER === Game over by surrender");
         commands.insert_resource(GameResult {
             victory: false,
             game_duration: game_timer.elapsed,
@@ -965,7 +1228,6 @@ fn check_nexus_destroyed(
         if structure.structure_type != StructureType::Nexus { continue; }
         if health.current <= 0.0 {
             let victory = structure.team != my_team;
-            println!("=== {} === Nexus destroyed!", if victory { "VICTORY" } else { "DEFEAT" });
             commands.insert_resource(GameResult {
                 victory,
                 game_duration: game_timer.elapsed,
