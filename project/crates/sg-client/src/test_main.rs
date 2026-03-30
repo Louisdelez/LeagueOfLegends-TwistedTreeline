@@ -10,6 +10,7 @@ mod ability_plugin;
 mod objectives_plugin;
 pub mod net_plugin;
 mod fog_plugin;
+mod garen_plugin;
 mod minion_plugin;
 mod navigation_plugin;
 mod shop_plugin;
@@ -48,6 +49,7 @@ fn main() {
         .add_plugins(objectives_plugin::ObjectivesPlugin)
         .add_plugins(navigation_plugin::NavigationPlugin)
         .add_plugins(minion_plugin::MinionPlugin)
+        .add_plugins(garen_plugin::GarenPlugin)
         .add_plugins(fog_plugin::FogPlugin)
         .add_plugins(shop_plugin::ShopPlugin)
         .add_plugins(hud_plugin::HudPlugin)

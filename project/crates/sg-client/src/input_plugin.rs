@@ -127,6 +127,15 @@ fn spawn_champion_on_enter(
         ChampionAnimState::default(),
     ));
 
+    // Add champion-specific components
+    if champ_id == ChampionId::Garen {
+        commands.entity(entity).insert((
+            crate::garen_plugin::GarenPassive { no_damage_timer: 0.0 },
+            crate::garen_plugin::GarenWPassive { stacks: 0.0 },
+            crate::garen_plugin::GarenLastHP(def.hp),
+        ));
+    }
+
     if let Some(path) = model_path {
         commands.entity(entity).with_children(|parent| {
             parent.spawn((
@@ -214,6 +223,15 @@ fn spawn_champion_on_enter(
             GameStats::default(),
             ChampionAnimState::default(),
         ));
+
+        // Add champion-specific components for bots
+        if bot_champ_id == ChampionId::Garen {
+            commands.entity(bot_entity).insert((
+                crate::garen_plugin::GarenPassive { no_damage_timer: 0.0 },
+                crate::garen_plugin::GarenWPassive { stacks: 0.0 },
+                crate::garen_plugin::GarenLastHP(bot_def.hp),
+            ));
+        }
 
         // Attach 3D model
         if let Some(path) = bot_model {

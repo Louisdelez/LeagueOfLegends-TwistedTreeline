@@ -31,6 +31,8 @@ pub enum ChampionAnimState {
     Walking,
     Attacking,
     Dead,
+    Spinning,  // Garen E
+    Casting,   // Garen R
 }
 
 impl Default for ChampionAnimState {
@@ -54,11 +56,14 @@ fn update_anim_state(
         Option<&MoveTarget>,
         Option<&AttackTarget>,
         Option<&Dead>,
+        Option<&crate::garen_plugin::GarenESpin>,
     ), With<Champion>>,
 ) {
-    for (mut state, move_target, attack_target, dead) in &mut query {
+    for (mut state, move_target, attack_target, dead, garen_spin) in &mut query {
         let new_state = if dead.is_some() {
             ChampionAnimState::Dead
+        } else if garen_spin.is_some() {
+            ChampionAnimState::Spinning
         } else if attack_target.is_some() {
             ChampionAnimState::Attacking
         } else if move_target.is_some() {
@@ -90,7 +95,7 @@ fn champion_anim_indices(id: ChampionId) -> [usize; 4] {
     // [idle, run, attack, death] — GLTF clip indices
     match id {
         ChampionId::Annie      => [6, 17, 13, 10],
-        ChampionId::Garen      => [7, 8, 5, 22],
+        ChampionId::Garen      => [7, 8, 14, 22], // idle1, run, attack1, death
         ChampionId::Ashe       => [4, 1, 8, 12],
         ChampionId::Darius     => [1, 5, 9, 18],
         ChampionId::Lux        => [0, 1, 6, 16],
@@ -108,25 +113,30 @@ fn champion_anim_indices(id: ChampionId) -> [usize; 4] {
 }
 
 fn switch_champion_animations(
-    champions: Query<(&ChampionAnimState, &Children, Option<&ChampionIdentity>), (With<Champion>, Changed<ChampionAnimState>)>,
+    champions: Query<(&ChampionAnimState, &Children, Option<&ChampionIdentity>, Option<&crate::garen_plugin::GarenQBuff>), (With<Champion>, Changed<ChampionAnimState>)>,
     children_q: Query<&Children>,
     mut players: Query<&mut AnimationPlayer>,
 ) {
-    for (state, children, champ_id_opt) in &champions {
+    for (state, children, champ_id_opt, garen_q) in &champions {
         let indices = champ_id_opt
             .map(|id| champion_anim_indices(id.0))
             .unwrap_or([6, 17, 13, 10]); // default to Annie
 
+        let is_garen = champ_id_opt.map(|id| id.0 == ChampionId::Garen).unwrap_or(false);
+
+        let has_q = garen_q.is_some();
         let clip_idx = match state {
             ChampionAnimState::Idle => indices[0],
-            ChampionAnimState::Walking => indices[1],
-            ChampionAnimState::Attacking => indices[2],
+            ChampionAnimState::Walking => if is_garen && has_q { 29 } else { indices[1] }, // Q run
+            ChampionAnimState::Attacking => if is_garen && has_q { 27 } else { indices[2] }, // Q attack (spell1)
             ChampionAnimState::Dead => indices[3],
+            ChampionAnimState::Spinning => if is_garen { 5 } else { indices[2] }, // spell3_0
+            ChampionAnimState::Casting => if is_garen { 6 } else { indices[2] },  // spell4
         };
-        // AnimationNodeIndex is 1-indexed (0 = root node)
         let node = bevy::animation::graph::AnimationNodeIndex::new(clip_idx + 1);
         let repeat = match state {
             ChampionAnimState::Dead => RepeatAnimation::Never,
+            ChampionAnimState::Casting => RepeatAnimation::Never,
             _ => RepeatAnimation::Forever,
         };
 

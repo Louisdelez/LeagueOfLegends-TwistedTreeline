@@ -351,6 +351,8 @@ fn execute_auto_attacks(
         &mut TurretAggro,
     ), With<Structure>>,
     mut targets: Query<(&Transform, &mut Health, Option<&CombatStats>, Option<&mut crate::ability_plugin::Shield>)>,
+    mut garen_q_buffs: Query<&mut crate::garen_plugin::GarenQBuff>,
+    mut target_buffs: Query<Option<&mut ActiveBuffs>>,
 ) {
     // Phase 1: Collect all attacks (read-only pass on attackers)
     struct Attack { atk: Entity, tgt: Entity, ad: f32, atk_speed: f32, range: f32, atk_pos: Vec3 }
@@ -418,6 +420,32 @@ fn execute_auto_attacks(
         }
 
         tgt_health.current -= damage;
+
+        // Garen Q empowered auto-attack: bonus damage + silence
+        if let Ok(mut q_buff) = garen_q_buffs.get_mut(atk.atk) {
+            if q_buff.empowered {
+                tgt_health.current -= q_buff.bonus_damage;
+                q_buff.empowered = false;
+                // Apply silence to target
+                if let Ok(Some(mut buffs)) = target_buffs.get_mut(atk.tgt) {
+                    buffs.0.push(sg_core::BuffData {
+                        buff_type: sg_core::BuffType::Silence,
+                        duration: q_buff.silence_duration,
+                        remaining: q_buff.silence_duration,
+                        source: Some(atk.atk),
+                    });
+                }
+                // Remove Q buff + small lunge toward target
+                if let Ok(mut ecmd) = commands.get_entity(atk.atk) {
+                    ecmd.remove::<crate::garen_plugin::GarenQBuff>();
+                    // Lunge: move Garen 50 units toward target
+                    let dir = (tgt_tf.translation - atk.atk_pos).normalize_or_zero();
+                    let lunge_pos = atk.atk_pos + dir * 50.0;
+                    ecmd.insert(MoveTarget { position: Vec2::new(lunge_pos.x, lunge_pos.z) });
+                }
+            }
+        }
+
         play_sfx(&mut commands, &sfx.hit);
 
         // Damage popup

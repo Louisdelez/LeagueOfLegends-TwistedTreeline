@@ -99,7 +99,7 @@ pub fn get_champion_by_id(id: ChampionId) -> ChampionDef {
             q_name: "Decisive Strike", w_name: "Courage", e_name: "Judgment", r_name: "Demacian Justice",
             passive_name: "Perseverance",
             q_cd: [8.0, 8.0, 8.0, 8.0, 8.0], w_cd: [24.0, 23.0, 22.0, 21.0, 20.0],
-            e_cd: [9.0, 9.0, 9.0, 9.0, 9.0], r_cd: [120.0, 100.0, 80.0],
+            e_cd: [13.0, 12.0, 11.0, 10.0, 9.0], r_cd: [160.0, 120.0, 80.0],
             q_dmg: [30.0, 55.0, 80.0, 105.0, 130.0], w_dmg: [0.0; 5],
             e_dmg: [20.0, 45.0, 70.0, 95.0, 120.0], r_dmg: [175.0, 350.0, 525.0],
             q_ap_ratio: 0.0, w_ap_ratio: 0.0, e_ad_ratio: 0.36, r_ap_ratio: 0.0,

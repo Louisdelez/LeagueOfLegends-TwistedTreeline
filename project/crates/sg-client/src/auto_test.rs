@@ -21,34 +21,32 @@ impl Plugin for AutoTestPlugin {
     }
 }
 
-/// MINION-ONLY MODE — despawn everything except minions, structures, map
+/// GAREN TEST — convert player to bot, keep all champions
 fn convert_player_to_bot(
     mut commands: Commands,
-    champions: Query<Entity, With<Champion>>,
+    player: Query<(Entity, &TeamMember), (With<PlayerControlled>, Without<sg_ai::champion_ai::BotController>)>,
     fog_tiles: Query<Entity, With<crate::fog_plugin::FogTile>>,
     mut done: Local<bool>,
 ) {
     if *done { return; }
+    let Ok((entity, _)) = player.single() else { return; };
     *done = true;
 
-    // Despawn ALL champions
-    for entity in &champions {
-        if let Ok(mut ecmd) = commands.get_entity(entity) {
-            ecmd.despawn();
-        }
-    }
+    // Convert player to bot so it plays automatically
+    commands.entity(entity).insert(sg_ai::champion_ai::BotController::new(Lane::Top));
 
-    // Despawn fog tiles (dark overlay that blocks visibility)
-    for entity in &fog_tiles {
-        if let Ok(mut ecmd) = commands.get_entity(entity) {
+    // Remove fog for visibility
+    for fog in &fog_tiles {
+        if let Ok(mut ecmd) = commands.get_entity(fog) {
             ecmd.despawn();
         }
     }
 }
 
-/// Camera locked on ONE minion — follows the first Blue melee minion that spawns
+/// Camera locked on GAREN — follows the first Garen champion found
 fn follow_bot_camera(
     player: Query<&Transform, (With<PlayerControlled>, With<Champion>, Without<Camera3d>)>,
+    garens: Query<(Entity, &Transform, &crate::ability_plugin::ChampionIdentity), (With<Champion>, Without<Dead>, Without<Camera3d>)>,
     minions: Query<(Entity, &Transform), (With<Minion>, Without<Dead>, Without<Camera3d>)>,
     mut camera: Query<&mut Transform, (With<Camera3d>, Without<Champion>, Without<Minion>)>,
     time: Res<Time>,
@@ -57,32 +55,41 @@ fn follow_bot_camera(
 ) {
     let Ok(mut cam_tf) = camera.single_mut() else { return; };
 
-    // Lock on the first minion we find and NEVER change
+    // Find Garen to track
     if tracked.is_none() {
-        if let Some((e, _)) = minions.iter().next() {
-            *tracked = Some(e);
-        }
-    }
-
-    // Follow the tracked minion
-    if let Some(target_entity) = *tracked {
-        if let Ok((_, m_tf)) = minions.get(target_entity) {
-            let pos = m_tf.translation;
-            cam_tf.translation = Vec3::new(pos.x, pos.y + 800.0, pos.z + 500.0);
-            cam_tf.look_at(pos, Vec3::Y);
-            return;
-        } else {
-            // Tracked minion died — pick the next one
-            *tracked = None;
-            if let Some((e, _)) = minions.iter().next() {
+        for (e, _, id) in &garens {
+            if id.0 == sg_gameplay::champions::ChampionId::Garen {
                 *tracked = Some(e);
+                break;
             }
         }
     }
 
-    // Fallback: map center
-    cam_tf.translation = Vec3::new(7700.0, 3000.0, 9300.0);
-    cam_tf.look_at(Vec3::new(7700.0, 50.0, 7300.0), Vec3::Y);
+    // Follow Garen
+    if let Some(target_entity) = *tracked {
+        if let Ok((_, g_tf, _)) = garens.get(target_entity) {
+            let pos = g_tf.translation;
+            // LoL isometric camera close to Garen
+            cam_tf.translation = Vec3::new(pos.x, pos.y + 1200.0, pos.z + 800.0);
+            cam_tf.look_at(pos, Vec3::Y);
+            return;
+        } else {
+            // Garen died or despawned — find another Garen
+            *tracked = None;
+            for (e, _, id) in &garens {
+                if id.0 == sg_gameplay::champions::ChampionId::Garen {
+                    *tracked = Some(e);
+                    break;
+                }
+            }
+        }
+    }
+
+    // Fallback: follow player
+    if let Ok(p_tf) = player.single() {
+        cam_tf.translation = Vec3::new(p_tf.translation.x, p_tf.translation.y + 1800.0, p_tf.translation.z + 1200.0);
+        cam_tf.look_at(p_tf.translation, Vec3::Y);
+    }
 }
 
 // ═══════════════════════════════════════════════════════

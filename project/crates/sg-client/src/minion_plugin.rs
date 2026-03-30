@@ -141,7 +141,7 @@ pub struct MinionAI {
 }
 
 #[derive(Component)]
-struct Dying(f32);
+pub struct Dying(pub f32);
 
 /// Visual attack feedback — scale pulse when attacking
 #[derive(Component)]
@@ -153,7 +153,7 @@ struct LastAnimState(u8); // 0=idle, 1=run, 2=attack, 3=death
 
 /// Marker: gold already awarded for this minion death
 #[derive(Component)]
-struct GoldAwarded;
+pub struct GoldAwarded;
 
 /// Delayed melee damage (windup before damage applies)
 #[derive(Component)]
@@ -762,14 +762,14 @@ fn minion_projectile(
 /// Collision between all units — minions push each other AND champions (creep block)
 fn minion_collision(
     mut minions: Query<(Entity, &mut Transform, &MinionAI), (With<Minion>, Without<Dead>, Without<Dying>)>,
-    mut champions: Query<(Entity, &mut Transform), (With<Champion>, Without<Dead>, Without<Minion>)>,
+    mut champions: Query<(Entity, &mut Transform, Option<&crate::garen_plugin::GarenESpin>), (With<Champion>, Without<Dead>, Without<Minion>)>,
 ) {
     // Collect all unit positions + radii
     let minion_data: Vec<(Entity, Vec3, f32)> = minions.iter()
         .map(|(e, tf, ai)| (e, tf.translation, ai.collision_radius))
         .collect();
-    let champ_data: Vec<(Entity, Vec3, f32)> = champions.iter()
-        .map(|(e, tf)| (e, tf.translation, 35.0)) // Champion pathfinding radius ~35
+    let champ_data: Vec<(Entity, Vec3, f32, bool)> = champions.iter()
+        .map(|(e, tf, spin)| (e, tf.translation, 35.0, spin.is_some())) // ghosted if spinning
         .collect();
 
     // Minion-minion collision
@@ -796,8 +796,9 @@ fn minion_collision(
         }
     }
 
-    // Creep block: minions push champions
-    for (champ_e, mut champ_tf) in &mut champions {
+    // Creep block: minions push champions (skip ghosted/spinning)
+    for (champ_e, mut champ_tf, garen_spin) in &mut champions {
+        if garen_spin.is_some() { continue; } // Ghosted during E spin
         let mut push_x = 0.0f32;
         let mut push_z = 0.0f32;
 

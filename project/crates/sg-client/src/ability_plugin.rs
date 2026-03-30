@@ -105,10 +105,16 @@ fn ability_input(
     let rank_r = if level >= 16 { 2 } else if level >= 11 { 1 } else { 0 };
 
     // Use champion-specific mana costs or defaults
-    let mana_costs = match kit {
-        ChampionClass::Mage => [60.0, 80.0, 50.0, 100.0],
-        ChampionClass::Fighter => [40.0, 50.0, 45.0, 80.0],
-        ChampionClass::Tank => [50.0, 60.0, 55.0, 90.0],
+    // Champions with 0 max mana (Garen, etc.) have no mana costs
+    let no_mana = mana.max <= 0.1;
+    let mana_costs = if no_mana {
+        [0.0, 0.0, 0.0, 0.0]
+    } else {
+        match kit {
+            ChampionClass::Mage => [60.0, 80.0, 50.0, 100.0],
+            ChampionClass::Fighter => [40.0, 50.0, 45.0, 80.0],
+            ChampionClass::Tank => [50.0, 60.0, 55.0, 90.0],
+        }
     };
 
     cds.q = (cds.q - dt).max(0.0);
@@ -126,8 +132,11 @@ fn ability_input(
     let player_pos = player_tf.translation;
     let direction = (target_pos - player_pos).normalize_or_zero();
 
+    // Skip generic abilities for champions with dedicated plugins (Garen)
+    let has_custom_plugin = champ_id_opt.map(|id| id.0 == sg_gameplay::champions::ChampionId::Garen).unwrap_or(false);
+
     // === Q ===
-    if keys.just_pressed(KeyCode::KeyA) && cds.q <= 0.0 && mana.current >= mana_costs[0] {
+    if keys.just_pressed(KeyCode::KeyA) && cds.q <= 0.0 && mana.current >= mana_costs[0] && !has_custom_plugin {
         let (q_cd, q_dmg, q_ratio) = if let Some(ref def) = champ_def {
             (def.q_cd[rank_q], def.q_dmg[rank_q], def.q_ap_ratio)
         } else {
@@ -229,7 +238,7 @@ fn ability_input(
     }
 
     // === W ===
-    if keys.just_pressed(KeyCode::KeyW) && cds.w <= 0.0 && mana.current >= mana_costs[1] {
+    if keys.just_pressed(KeyCode::KeyW) && cds.w <= 0.0 && mana.current >= mana_costs[1] && !has_custom_plugin {
         let (w_cd, w_dmg, w_ratio) = if let Some(ref def) = champ_def {
             (def.w_cd[rank_q], def.w_dmg[rank_q], def.w_ap_ratio)
         } else {
@@ -321,7 +330,7 @@ fn ability_input(
     }
 
     // === E ===
-    if keys.just_pressed(KeyCode::KeyE) && cds.e <= 0.0 && mana.current >= mana_costs[2] {
+    if keys.just_pressed(KeyCode::KeyE) && cds.e <= 0.0 && mana.current >= mana_costs[2] && !has_custom_plugin {
         let (e_cd, e_dmg, e_ratio) = if let Some(ref def) = champ_def {
             (def.e_cd[rank_q], def.e_dmg[rank_q], def.e_ad_ratio)
         } else {
@@ -439,7 +448,7 @@ fn ability_input(
     }
 
     // === R ===
-    if keys.just_pressed(KeyCode::KeyR) && cds.r <= 0.0 && mana.current >= mana_costs[3] {
+    if keys.just_pressed(KeyCode::KeyR) && cds.r <= 0.0 && mana.current >= mana_costs[3] && !has_custom_plugin {
         let (r_cd, r_dmg, r_ratio) = if let Some(ref def) = champ_def {
             (def.r_cd[rank_r], def.r_dmg[rank_r], def.r_ap_ratio)
         } else {
